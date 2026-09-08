@@ -29,6 +29,22 @@ import type {
   User
 } from "../data/schema";
 
+export interface CourseCompletionState {
+  percent: number;
+  requiredItems: string[];
+  completedItems: string[];
+  remainingItems: string[];
+  nextAction?: { label: string; lessonId?: string; type: string };
+  canStartAssessment: boolean;
+  assessmentPassed: boolean;
+  acknowledgementRequired: boolean;
+  acknowledgementComplete: boolean;
+  courseComplete: boolean;
+  certificateAvailable: boolean;
+  resumeDestination: string;
+  score?: number;
+}
+
 export interface Session {
   sessionId: string;
   userId: string;
@@ -969,9 +985,14 @@ export class WorkflowService {
     await this.persist();
   }
 
+  getCourseCompletionState(courseId: string, userId = this.actorId): CourseCompletionState {
+    return getCourseCompletionState(this.data, userId, courseId);
+  }
+
   async completeLesson(courseId: string, lessonId: string) {
     if (!this.data.lessonProgress.some((item) => item.userId === this.actorId && item.lessonId === lessonId)) {
       this.data.lessonProgress.push({ id: id("lp"), userId: this.actorId, lessonId, completedAt: now(), createdAt: now(), updatedAt: now() });
+      audit(this.data, this.actorId, "LESSON_COMPLETED", "Lesson", lessonId, "Completed lesson.");
     }
     const enrollment = this.ensureEnrollment(courseId);
     enrollment.status = "IN_PROGRESS";
@@ -981,25 +1002,97 @@ export class WorkflowService {
     await this.persist();
   }
 
+  async saveLessonNote(lessonId: string, note: string) {
+    let progress = this.data.lessonProgress.find((item) => item.userId === this.actorId && item.lessonId === lessonId);
+    if (!progress) {
+      progress = { id: id("lp"), userId: this.actorId, lessonId, createdAt: now(), updatedAt: now() };
+      this.data.lessonProgress.push(progress);
+    }
+    progress.notes = note;
+    progress.updatedAt = now();
+    await this.persist();
+  }
+
+  async toggleBookmark(lessonId: string) {
+    let progress = this.data.lessonProgress.find((item) => item.userId === this.actorId && item.lessonId === lessonId);
+    if (!progress) {
+      progress = { id: id("lp"), userId: this.actorId, lessonId, createdAt: now(), updatedAt: now() };
+      this.data.lessonProgress.push(progress);
+    }
+    const current = (progress as unknown as { bookmarked?: boolean }).bookmarked;
+    (progress as unknown as { bookmarked?: boolean }).bookmarked = !current;
+    progress.updatedAt = now();
+    await this.persist();
+  }
+
+  async completeLearningActivity(courseId: string, lessonId: string, activityId: string, answers: unknown, score = 100) {
+    const course = this.requireCourse(courseId);
+    const existing = this.data.scenarioAttempts.find((item) => item.userId === this.actorId && item.scenarioId === activityId);
+    if (existing) {
+      existing.answers = answers;
+      existing.score = score;
+      existing.status = "COMPLETED";
+      existing.lastStep = Array.isArray(answers) ? answers.length : undefined;
+      existing.completedAt = existing.completedAt ?? now();
+      existing.updatedAt = now();
+    } else {
+      this.data.scenarioAttempts.push({
+        id: id("scenarioattempt"),
+        scenarioId: activityId,
+        userId: this.actorId,
+        courseId,
+        courseVersionId: course.currentVersionId,
+        lessonId,
+        score,
+        answers,
+        status: "COMPLETED",
+        lastStep: Array.isArray(answers) ? answers.length : undefined,
+        completedAt: now(),
+        createdAt: now(),
+        updatedAt: now()
+      });
+    }
+    audit(this.data, this.actorId, "LEARNING_ACTIVITY_COMPLETED", "Course", courseId, "Completed required course activity.");
+    this.recalculateCourseProgress(courseId);
+    await this.persist();
+  }
+
   async submitAssessment(courseId: string, answers: Record<string, unknown>) {
     const course = this.data.courses.find((item) => item.id === courseId)!;
     const assessment = this.data.assessments.find((item) => item.courseVersionId === course.currentVersionId)!;
     const assessmentQuestions = this.data.assessmentQuestions.filter((item) => item.assessmentId === assessment.id);
     let correct = 0;
+    const missedTopics: string[] = [];
     for (const link of assessmentQuestions) {
+      const question = this.data.questions.find((item) => item.id === link.questionId)!;
       const options = this.data.questionOptions.filter((option) => option.questionId === link.questionId);
       const answer = answers[link.questionId];
       const isCorrect = evaluateAnswer(options, answer);
       if (isCorrect) correct += 1;
+      else missedTopics.push(question.tags.find((tag) => !["NERC CIP", "CIP-004"].includes(tag)) ?? "Course Review");
     }
     const score = Math.round((correct / assessmentQuestions.length) * 100);
     const passed = score >= assessment.passingScore;
-    const attempt = { id: id("attempt"), userId: this.actorId, assessmentId: assessment.id, courseId, score, passed, submittedAt: now(), attemptNumber: this.data.assessmentAttempts.filter((item) => item.userId === this.actorId && item.assessmentId === assessment.id).length + 1, createdAt: now(), updatedAt: now() };
+    const attempt = { id: id("attempt"), userId: this.actorId, assessmentId: assessment.id, courseId, score, passed, submittedAt: now(), attemptNumber: this.data.assessmentAttempts.filter((item) => item.userId === this.actorId && item.assessmentId === assessment.id).length + 1, answers, correctCount: correct, totalQuestions: assessmentQuestions.length, missedTopics: Array.from(new Set(missedTopics)), createdAt: now(), updatedAt: now() };
     this.data.assessmentAttempts.push(attempt);
     audit(this.data, this.actorId, "ASSESSMENT_SUBMITTED", "Assessment", assessment.id, `Submitted assessment with score ${score}%.`);
-    if (passed) this.completeCourse(courseId, score);
+    if (passed && !course.requireAcknowledgement) this.completeCourse(courseId, score);
+    this.recalculateCourseProgress(courseId);
     await this.persist();
     return attempt;
+  }
+
+  async submitAcknowledgement(courseId: string, acknowledgementText: string) {
+    const course = this.requireCourse(courseId);
+    const version = this.requireCurrentVersion(course);
+    const existing = this.data.acknowledgements.find((item) => item.userId === this.actorId && item.courseId === courseId && item.courseVersionId === version.id);
+    if (!existing) {
+      this.data.acknowledgements.push({ id: id("ack"), userId: this.actorId, courseId, courseVersionId: version.id, text: acknowledgementText, acknowledgementVersion: "1.0", submittedAt: now(), status: "SUBMITTED", createdAt: now(), updatedAt: now() });
+      audit(this.data, this.actorId, "ACKNOWLEDGEMENT_SUBMITTED", "Course", courseId, "Submitted learner acknowledgement.");
+    }
+    const lastPass = this.getPassingAssessment(courseId);
+    if (lastPass) this.completeCourse(courseId, lastPass.score);
+    await this.persist();
   }
 
   private ensureEnrollment(courseId: string): Enrollment {
@@ -1013,21 +1106,23 @@ export class WorkflowService {
 
   private recalculateCourseProgress(courseId: string) {
     const course = this.data.courses.find((item) => item.id === courseId)!;
-    const lessons = this.data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId && lesson.required);
-    const completed = lessons.filter((lesson) => this.data.lessonProgress.some((progress) => progress.userId === this.actorId && progress.lessonId === lesson.id)).length;
-    const percentComplete = lessons.length ? Math.round((completed / lessons.length) * 100) : 0;
+    const state = getCourseCompletionState(this.data, this.actorId, courseId);
+    const percentComplete = state.percent;
     let progress = this.data.courseProgress.find((item) => item.userId === this.actorId && item.courseId === courseId);
     if (!progress) {
       progress = { id: id("cp"), userId: this.actorId, courseId, courseVersionId: course.currentVersionId!, status: "IN_PROGRESS", percentComplete, createdAt: now(), updatedAt: now() };
       this.data.courseProgress.push(progress);
     }
     progress.percentComplete = percentComplete;
+    progress.status = state.courseComplete ? "COMPLETED" : percentComplete > 0 ? "IN_PROGRESS" : progress.status;
     progress.updatedAt = now();
   }
 
   private completeCourse(courseId: string, score: number) {
     const course = this.data.courses.find((item) => item.id === courseId)!;
     const version = this.data.courseVersions.find((item) => item.id === course.currentVersionId)!;
+    const existingEvidence = this.data.evidenceRecords.find((item) => item.userId === this.actorId && item.courseId === courseId && item.courseVersionId === version.id);
+    if (existingEvidence) return;
     const enrollment = this.ensureEnrollment(courseId);
     enrollment.status = "COMPLETED";
     enrollment.completedAt = now();
@@ -1040,15 +1135,24 @@ export class WorkflowService {
     const requirement = this.data.certificationRequirements.find((item) => item.type === "COURSE" && item.targetId === courseId);
     let certificateId: string | undefined;
     if (course.certificateEnabled || requirement) {
-      certificateId = `GG-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
+      certificateId = certificateIdFor(user, course);
       const certificationId = requirement?.certificationId ?? this.createAdHocCertification(course);
-      this.data.userCertifications.push({ id: id("ucert"), userId: this.actorId, certificationId, courseId, certificateId, issuedAt: now(), expiresAt: addDays(new Date(), 365).toISOString(), status: "ACTIVE", createdAt: now(), updatedAt: now() });
+      this.data.userCertifications.push({ id: id("ucert"), userId: this.actorId, certificationId, courseId, courseVersionId: version.id, certificateId, issuedAt: now(), expiresAt: addDays(new Date(), course.certificateExpirationMonths ? course.certificateExpirationMonths * 30 : 365).toISOString(), status: "ACTIVE", createdAt: now(), updatedAt: now() });
       notify(this.data, this.actorId, "CERTIFICATE_EARNED", "Certificate earned", `${course.title} certificate is ready.`, "/certifications");
       audit(this.data, this.actorId, "CERTIFICATE_ISSUED", "Course", courseId, `Issued certificate for ${course.title}.`);
     }
-    const assignment = this.data.enrollments.find((item) => item.userId === this.actorId && item.courseId === courseId)?.assignmentId;
-    this.data.evidenceRecords.push({ id: id("evidence"), organizationId: this.data.organizations[0].id, userId: this.actorId, userDisplayName: user.name, courseId, courseTitle: course.title, courseVersionId: version.id, assignmentId: assignment, completedAt: now(), assessmentScore: score, certificationId: requirement?.certificationId, certificateId, acknowledgementText: "Learner completed required training and acknowledgement.", standardRefs: this.data.courseStandardMappings.filter((mapping) => mapping.courseId === courseId).map((mapping) => mapping.standardVersionId), status: "CURRENT", createdAt: now(), updatedAt: now() });
+    const acknowledgement = this.data.acknowledgements.find((item) => item.userId === this.actorId && item.courseId === courseId && item.courseVersionId === version.id);
+    this.data.evidenceRecords.push({ id: id("evidence"), organizationId: this.data.organizations[0].id, title: `Training Completion — ${user.name} — ${(course.shortTitle ?? course.title)} v${version.version}`, evidenceType: "TRAINING_COMPLETION", userId: this.actorId, userDisplayName: user.name, courseId, courseTitle: course.title, courseVersionId: version.id, assignmentId: enrollment.assignmentId, enrollmentId: enrollment.id, completedAt: now(), assessmentScore: score, certificationId: requirement?.certificationId, certificateId, acknowledgementText: acknowledgement?.text ?? "Learner completed required training and acknowledgement.", source: "GridGuard Learning", standardRefs: this.data.courseStandardMappings.filter((mapping) => mapping.courseId === courseId).map((mapping) => mapping.standardVersionId), status: "CURRENT", createdAt: now(), updatedAt: now() });
     audit(this.data, this.actorId, "COURSE_COMPLETED", "Course", courseId, `Completed ${course.title}.`);
+  }
+
+  private getPassingAssessment(courseId: string) {
+    const course = this.requireCourse(courseId);
+    const assessment = this.data.assessments.find((item) => item.courseVersionId === course.currentVersionId);
+    if (!assessment) return undefined;
+    return this.data.assessmentAttempts
+      .filter((item) => item.userId === this.actorId && item.assessmentId === assessment.id && item.passed)
+      .sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime())[0];
   }
 
   private createAdHocCertification(course: Course) {
@@ -1171,6 +1275,82 @@ function evaluateAnswer(options: QuestionOption[], answer: unknown) {
   if (Array.isArray(answer)) return correct.length === answer.length && correct.every((item) => answer.includes(item));
   if (typeof answer === "string") return correct.includes(answer) || answer.trim().length > 0;
   return false;
+}
+
+export function getCourseCompletionState(data: AppData, userId: string, courseId: string): CourseCompletionState {
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course?.currentVersionId) {
+    return { percent: 0, requiredItems: [], completedItems: [], remainingItems: [], canStartAssessment: false, assessmentPassed: false, acknowledgementRequired: false, acknowledgementComplete: false, courseComplete: false, certificateAvailable: false, resumeDestination: `/courses/${courseId}` };
+  }
+  const modules = data.modules.filter((module) => module.courseVersionId === course.currentVersionId);
+  const modulePosition = new Map(modules.map((module) => [module.id, module.position]));
+  const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId).sort((left, right) => (modulePosition.get(left.moduleId) ?? 0) - (modulePosition.get(right.moduleId) ?? 0) || left.position - right.position);
+  const assessmentLesson = lessons.find((lesson) => lesson.title.toLowerCase().includes("final assessment"));
+  const acknowledgementLesson = lessons.find((lesson) => lesson.title.toLowerCase().includes("acknowledgement"));
+  const normalRequiredLessons = lessons.filter((lesson) => lesson.required && !["final assessment", "learner acknowledgement", "completion summary", "certificate"].some((title) => lesson.title.toLowerCase().includes(title)));
+  const requiredActivityBlocks = data.contentBlocks.filter((block) => block.required && lessons.some((lesson) => lesson.id === block.lessonId) && ["scenario", "decision_exercise"].includes(block.type));
+  const requiredItems = [
+    ...normalRequiredLessons.map((lesson) => lesson.id),
+    ...requiredActivityBlocks.map((block) => block.id),
+    ...(course.finalAssessmentEnabled !== false ? ["assessment"] : []),
+    ...(course.requireAcknowledgement ? ["acknowledgement"] : [])
+  ];
+  const completedItems: string[] = [];
+  for (const lesson of normalRequiredLessons) {
+    if (data.lessonProgress.some((progress) => progress.userId === userId && progress.lessonId === lesson.id && progress.completedAt)) completedItems.push(lesson.id);
+  }
+  for (const block of requiredActivityBlocks) {
+    if (data.scenarioAttempts.some((attempt) => attempt.userId === userId && attempt.scenarioId === block.id && attempt.status === "COMPLETED")) completedItems.push(block.id);
+  }
+  const assessment = data.assessments.find((item) => item.courseVersionId === course.currentVersionId);
+  const passingAttempt = assessment
+    ? data.assessmentAttempts.filter((attempt) => attempt.userId === userId && attempt.assessmentId === assessment.id && attempt.passed).sort((left, right) => new Date(right.submittedAt).getTime() - new Date(left.submittedAt).getTime())[0]
+    : undefined;
+  if (passingAttempt) completedItems.push("assessment");
+  const acknowledgement = data.acknowledgements.find((item) => item.userId === userId && item.courseId === courseId && item.courseVersionId === course.currentVersionId);
+  if (course.requireAcknowledgement && acknowledgement) completedItems.push("acknowledgement");
+  const remainingItems = requiredItems.filter((item) => !completedItems.includes(item));
+  const canStartAssessment = normalRequiredLessons.every((lesson) => completedItems.includes(lesson.id)) && requiredActivityBlocks.every((block) => completedItems.includes(block.id));
+  const courseComplete = remainingItems.length === 0;
+  const enrollment = data.enrollments.find((item) => item.userId === userId && item.courseId === courseId);
+  const firstRemainingLesson = normalRequiredLessons.find((lesson) => !completedItems.includes(lesson.id));
+  const firstRemainingActivity = requiredActivityBlocks.find((block) => !completedItems.includes(block.id));
+  const resumeLessonId = enrollment?.currentLessonId && lessons.some((lesson) => lesson.id === enrollment.currentLessonId)
+    ? enrollment.currentLessonId
+    : firstRemainingLesson?.id ?? firstRemainingActivity?.lessonId ?? (canStartAssessment ? assessmentLesson?.id : lessons[0]?.id);
+  const nextAction = !canStartAssessment && (firstRemainingLesson?.id ?? firstRemainingActivity?.lessonId)
+    ? { label: `Continue: ${firstRemainingLesson?.title ?? lessons.find((lesson) => lesson.id === firstRemainingActivity?.lessonId)?.title ?? "Required training"}`, lessonId: firstRemainingLesson?.id ?? firstRemainingActivity?.lessonId, type: "lesson" }
+    : !passingAttempt
+      ? { label: "Begin Final Assessment", lessonId: assessmentLesson?.id, type: "assessment" }
+      : course.requireAcknowledgement && !acknowledgement
+        ? { label: "Submit Acknowledgement", lessonId: acknowledgementLesson?.id, type: "acknowledgement" }
+        : courseComplete
+          ? { label: "View Certificate", lessonId: lessons.find((lesson) => lesson.title === "Certificate")?.id, type: "certificate" }
+          : undefined;
+  const calculatedPercent = requiredItems.length ? Math.round((completedItems.length / requiredItems.length) * 100) : 0;
+  const persistedPercent = data.courseProgress.find((item) => item.userId === userId && item.courseId === courseId)?.percentComplete ?? 0;
+  return {
+    percent: courseComplete ? 100 : Math.max(calculatedPercent, persistedPercent),
+    requiredItems,
+    completedItems,
+    remainingItems,
+    nextAction,
+    canStartAssessment,
+    assessmentPassed: Boolean(passingAttempt),
+    acknowledgementRequired: Boolean(course.requireAcknowledgement),
+    acknowledgementComplete: Boolean(acknowledgement),
+    courseComplete,
+    certificateAvailable: data.userCertifications.some((cert) => cert.userId === userId && cert.courseId === courseId),
+    resumeDestination: resumeLessonId ? `/learn/${courseId}/${resumeLessonId}` : `/courses/${courseId}`,
+    score: passingAttempt?.score
+  };
+}
+
+function certificateIdFor(user: User, course: Course) {
+  if (course.id === "course-cip004-annual-refresher" && user.name === "Taylor Morgan") return `GG-CIP004-${new Date().getFullYear()}-TM-0001`;
+  const initials = `${user.firstName?.[0] ?? ""}${user.lastName?.[0] ?? ""}`.toUpperCase() || "GG";
+  const suffix = Math.abs([...`${user.id}${course.id}`].reduce((sum, char) => sum + char.charCodeAt(0), 0) % 9999).toString().padStart(4, "0");
+  return `GG-${new Date().getFullYear()}-${initials}-${suffix}`;
 }
 
 export function searchAuthorized(data: AppData, userId: string, query: string) {

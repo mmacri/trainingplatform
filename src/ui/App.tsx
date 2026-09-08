@@ -8,6 +8,7 @@ import {
   ClipboardCheck,
   Download,
   FileCheck2,
+  FileText,
   GraduationCap,
   Home,
   KeyRound,
@@ -20,6 +21,7 @@ import {
   Search,
   Settings,
   ShieldCheck,
+  Star,
   Sun,
   Upload,
   UsersRound,
@@ -29,7 +31,7 @@ import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { addDays, formatDistanceToNow } from "date-fns";
-import type { AppData, Course, CourseVersion, Role, User } from "../data/schema";
+import type { AppData, ContentBlock, Course, CourseVersion, Question, Role, User } from "../data/schema";
 import { createSeedData } from "../data/seed";
 import { getAllData, replaceAllData } from "../data/db";
 import {
@@ -44,6 +46,7 @@ import {
   canViewCompliance,
   canViewEvidence,
   canViewTeam,
+  getCourseCompletionState,
   getRoles,
   hasAnyRole,
   searchAuthorized
@@ -329,6 +332,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/courses/:courseId" element={<CourseLanding />} />
             <Route path="/learn/:courseId/:lessonId?" element={<CoursePlayer onNotes={() => setNotesOpen(true)} />} />
+            <Route path="/records/:courseId" element={<TrainingRecord />} />
             <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
             <Route path="/build/new" element={<Guard allow={canCreateCourses(data, user.id)} label="Create Course"><CourseCreationWizard /></Guard>} />
             <Route path="/build/questions" element={<Guard allow={canManageCourses(data, user.id)} label="Question Bank"><QuestionBank /></Guard>} />
@@ -551,7 +555,8 @@ function LibraryPage() {
 function CourseCard({ course }: { course: Course }) {
   const { data, user, service, setData, toast } = useApp();
   const access = canAccessCourse(data, user.id, course.id);
-  const progress = data.courseProgress.find((item) => item.userId === user.id && item.courseId === course.id)?.percentComplete ?? 0;
+  const state = getCourseCompletionState(data, user.id, course.id);
+  const progress = data.courseProgress.find((item) => item.userId === user.id && item.courseId === course.id)?.percentComplete ?? state.percent;
   const [requesting, setRequesting] = useState(false);
   const [reason, setReason] = useState("");
   const submitRequest = async () => {
@@ -573,7 +578,7 @@ function CourseCard({ course }: { course: Course }) {
       </div>
       {progress ? <div className="mt-4 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-cyan-700" style={{ width: `${progress}%` }} /></div> : null}
       <div className="mt-4 flex gap-2">
-        {access.allowed ? <Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white" to={`/courses/${course.id}`}>{progress ? "Continue" : "Start"}</Link> : course.allowAccessRequests ? <button className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white" onClick={() => setRequesting(true)}>Request Access</button> : <button disabled className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">Access Restricted</button>}
+        {access.allowed ? <Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white" to={progress ? state.resumeDestination : `/courses/${course.id}`}>{progress ? "Continue" : "Start"}</Link> : course.allowAccessRequests ? <button className="rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white" onClick={() => setRequesting(true)}>Request Access</button> : <button disabled className="rounded-md border border-border px-3 py-2 text-sm text-muted-foreground">Access Restricted</button>}
         {canEditCourse(data, user.id, course.id) ? <Link className="rounded-md border border-border px-3 py-2 text-sm" to={`/build/courses/${course.id}`}>Edit</Link> : null}
       </div>
       {requesting ? (
@@ -599,20 +604,49 @@ function CourseLanding() {
   if (!access.allowed) return <AccessRestricted label={course.title} />;
   const version = data.courseVersions.find((item) => item.id === course.currentVersionId)!;
   const modules = data.modules.filter((module) => module.courseVersionId === version.id).sort((a, b) => a.position - b.position);
-  const firstLesson = data.lessons.find((lesson) => lesson.courseVersionId === version.id);
+  const lessons = sortedLessons(data, version.id);
+  const state = getCourseCompletionState(data, user.id, course.id);
+  const hero = course.id === "course-cip004-annual-refresher";
   return (
     <>
-      <PageHeader title={course.title} subtitle={course.shortDescription} action={<Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={`/learn/${course.id}/${firstLesson?.id ?? ""}`}>Start Course</Link>} />
+      <PageHeader title={course.title} subtitle={course.subtitle ?? course.shortDescription} action={<Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={state.resumeDestination}>{state.percent ? "Resume Course" : "Start Course"}</Link>} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <Panel>
-          <h2 className="text-lg font-semibold">What You'll Learn</h2>
-          <p className="mt-2 text-muted-foreground">{version.goal}</p>
-          <div className="mt-5 space-y-3">
+          {hero ? <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-700">NERC CIP Training</p> : null}
+          <p className="text-muted-foreground">{hero ? "Personnel security depends on more than policies. It depends on people recognizing when access is appropriate, when circumstances have changed, when action is required, and how the organization proves those actions occurred." : version.goal}</p>
+          {hero ? <p className="mt-3 text-muted-foreground">This refresher walks through the practical responsibilities that help keep personnel access aligned with current job needs and create clear, repeatable evidence of completed training and access-management activities.</p> : null}
+          <div className="mt-5 grid gap-3 md:grid-cols-3">
+            {(hero ? ["75 min", course.difficulty, "Annual Training", "Certificate", "CIP-004", "Final Assessment"] : [`${course.estimatedMinutes} min`, course.difficulty, course.category, course.certificateEnabled ? "Certificate" : "No certificate", version.version, course.status]).map((item) => <div key={item} className="rounded-md border border-border bg-muted/40 p-3 text-sm font-medium">{item}</div>)}
+          </div>
+          {hero ? (
+            <div className="mt-6">
+              <h2 className="text-lg font-semibold">Why you're taking this course</h2>
+              <p className="mt-2 text-sm leading-6 text-muted-foreground">Personnel access changes throughout an individual's relationship with an organization. New hires join teams. Employees transfer. Administrators take on temporary responsibilities. Contractors complete engagements. Personnel leave the organization. Each change can affect which systems, facilities, applications, or privileges remain appropriate.</p>
+              <div className="mt-4 grid gap-3 md:grid-cols-4">
+                {[
+                  ["Recognize", "Identify personnel events that may require review or action."],
+                  ["Decide", "Choose the appropriate response when responsibilities or access needs change."],
+                  ["Document", "Understand what information makes a record useful and traceable."],
+                  ["Demonstrate", "Apply the concepts in realistic personnel-security scenarios."]
+                ].map(([title, body]) => <div key={title} className="rounded-md border border-border p-3"><h3 className="font-semibold">{title}</h3><p className="mt-1 text-sm text-muted-foreground">{body}</p></div>)}
+              </div>
+            </div>
+          ) : null}
+          <h2 className="mt-6 text-lg font-semibold">What You'll Learn</h2>
+          <ul className="mt-3 grid gap-2 text-sm text-muted-foreground md:grid-cols-2">
+            {data.learningObjectives.filter((objective) => objective.courseVersionId === version.id).map((objective) => <li key={objective.id} className="flex gap-2"><CheckCircle2 size={16} className="mt-0.5 text-cyan-700" />{objective.text}</li>)}
+          </ul>
+          <h2 className="mt-6 text-lg font-semibold">Course Outline</h2>
+          <div className="mt-3 space-y-3">
             {modules.map((module) => (
               <div key={module.id} className="rounded-md border border-border p-3">
-                <h3 className="font-medium">{module.title}</h3>
-                <ul className="mt-2 text-sm text-muted-foreground">
-                  {data.lessons.filter((lesson) => lesson.moduleId === module.id).map((lesson) => <li key={lesson.id}>{lesson.title}</li>)}
+                <div className="flex items-center justify-between"><h3 className="font-medium">{module.title}</h3><span className="text-xs text-muted-foreground">{moduleProgress(data, user.id, module.id)}%</span></div>
+                <ul className="mt-2 space-y-1 text-sm text-muted-foreground">
+                  {lessons.filter((lesson) => lesson.moduleId === module.id).map((lesson) => {
+                    const done = data.lessonProgress.some((progress) => progress.userId === user.id && progress.lessonId === lesson.id && progress.completedAt);
+                    const locked = lesson.title.includes("Final Assessment") && !state.canStartAssessment;
+                    return <li key={lesson.id} className="flex items-center justify-between gap-2"><span>{lesson.title}</span><span className="text-xs">{done ? "Completed" : locked ? "Locked - complete required activities first" : "Available"} · {lesson.estimatedMinutes} min</span></li>;
+                  })}
                 </ul>
               </div>
             ))}
@@ -625,6 +659,13 @@ function CourseLanding() {
           <Info label="Access" value={access.reason} />
           <Info label="Version" value={version.version} />
           <Info label="Certificate" value={course.certificateEnabled ? "Enabled" : "Not enabled"} />
+          <Info label="Progress" value={`${state.percent}%`} />
+          <div className="mt-5">
+            <h3 className="text-sm font-semibold">To complete this course</h3>
+            <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
+              {["Complete all required lessons.", "Complete all required knowledge checks.", "Complete the interactive Role Change scenario.", "Complete the Access Termination decision exercise.", "Score at least 80% on the final assessment.", "Complete the learner acknowledgement."].map((item) => <li key={item}>• {item}</li>)}
+            </ul>
+          </div>
         </Panel>
       </div>
     </>
@@ -639,10 +680,15 @@ function CoursePlayer({ onNotes }: { onNotes: () => void }) {
   if (!course) return <NotFound />;
   const access = canAccessCourse(data, user.id, course.id);
   if (!access.allowed) return <AccessRestricted label={course.title} />;
-  const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId).sort((a, b) => a.position - b.position);
+  const lessons = sortedLessons(data, course.currentVersionId);
   const lesson = lessons.find((item) => item.id === lessonId) ?? lessons[0];
   const blocks = data.contentBlocks.filter((block) => block.lessonId === lesson.id).sort((a, b) => a.position - b.position);
   const index = lessons.findIndex((item) => item.id === lesson.id);
+  const state = getCourseCompletionState(data, user.id, course.id);
+  const [note, setNote] = useState(data.lessonProgress.find((progress) => progress.userId === user.id && progress.lessonId === lesson.id)?.notes ?? "");
+  const bookmarked = Boolean(data.lessonProgress.find((progress) => progress.userId === user.id && progress.lessonId === lesson.id && (progress as unknown as { bookmarked?: boolean }).bookmarked));
+  const isAssessment = lesson.title.toLowerCase().includes("final assessment");
+  const isAcknowledgement = lesson.title.toLowerCase().includes("acknowledgement");
   const complete = async () => {
     const svc = service();
     await svc.completeLesson(course.id, lesson.id);
@@ -651,15 +697,39 @@ function CoursePlayer({ onNotes }: { onNotes: () => void }) {
     const next = lessons[index + 1];
     if (next) navigate(`/learn/${course.id}/${next.id}`);
   };
-  const allLessonsDone = lessons.every((item) => data.lessonProgress.some((progress) => progress.userId === user.id && progress.lessonId === item.id));
+  const saveNote = async (value: string) => {
+    setNote(value);
+    const svc = service();
+    await svc.saveLessonNote(lesson.id, value);
+    setData(svc.snapshot());
+  };
+  const toggleBookmark = async () => {
+    const svc = service();
+    await svc.toggleBookmark(lesson.id);
+    setData(svc.snapshot());
+    toast(bookmarked ? "Bookmark removed" : "Lesson saved");
+  };
+  const completeActivity = async (blockId: string, answers: unknown, score = 100) => {
+    const svc = service();
+    await svc.completeLearningActivity(course.id, lesson.id, blockId, answers, score);
+    setData(svc.snapshot());
+    toast("Activity complete");
+  };
+  const lessonDone = data.lessonProgress.some((progress) => progress.userId === user.id && progress.lessonId === lesson.id && progress.completedAt);
+  const requiredActivities = blocks.filter((block) => block.required && block.type !== "knowledge_check");
+  const activitiesDone = requiredActivities.every((block) => data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED"));
+  const canCompleteLesson = !requiredActivities.length || activitiesDone;
   return (
-    <div className="grid gap-5 xl:grid-cols-[280px_1fr]">
+    <div className="grid gap-5 xl:grid-cols-[280px_1fr_280px]">
       <Panel className="xl:sticky xl:top-20 xl:h-[calc(100vh-6rem)] xl:overflow-auto">
         <h2 className="font-semibold">{course.title}</h2>
+        <div className="mt-3 h-2 rounded-full bg-muted"><div className="h-2 rounded-full bg-cyan-700" style={{ width: `${state.percent}%` }} /></div>
+        <p className="mt-1 text-xs text-muted-foreground">{state.completedItems.length} / {state.requiredItems.length} required complete</p>
         <div className="mt-4 space-y-1">
           {lessons.map((item) => {
             const done = data.lessonProgress.some((progress) => progress.userId === user.id && progress.lessonId === item.id);
-            return <Link key={item.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${item.id === lesson.id ? "bg-cyan-50 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100" : "text-muted-foreground"}`} to={`/learn/${course.id}/${item.id}`}>{done ? <CheckCircle2 size={16} /> : <ChevronRight size={16} />} {item.title}</Link>;
+            const locked = item.title.toLowerCase().includes("final assessment") && !state.canStartAssessment;
+            return <Link key={item.id} className={`flex items-center gap-2 rounded-md px-2 py-2 text-sm ${item.id === lesson.id ? "bg-cyan-50 text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100" : locked ? "text-muted-foreground opacity-60" : "text-muted-foreground"}`} to={`/learn/${course.id}/${item.id}`}>{done ? <CheckCircle2 size={16} /> : <ChevronRight size={16} />} {item.title}</Link>;
           })}
         </div>
       </Panel>
@@ -667,63 +737,278 @@ function CoursePlayer({ onNotes }: { onNotes: () => void }) {
         <Panel>
           <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border pb-4">
             <div><p className="text-sm text-muted-foreground">Lesson {index + 1} of {lessons.length}</p><h1 className="text-2xl font-semibold">{lesson.title}</h1></div>
-            <div className="flex gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={onNotes}>My Notes</button><Link className="rounded-md border border-border px-3 py-2 text-sm" to={`/courses/${course.id}`}>Exit Course</Link></div>
+            <div className="flex gap-2"><button aria-label="Bookmark lesson" className="rounded-md border border-border px-3 py-2 text-sm" onClick={toggleBookmark}>{bookmarked ? "Saved" : "Save"}</button><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={onNotes}>My Notes</button><Link className="rounded-md border border-border px-3 py-2 text-sm" to={`/courses/${course.id}`}>Exit Course</Link></div>
           </div>
+          {course.id === "course-cip004-annual-refresher" && state.percent > 0 && !sessionStorage.getItem("gridguard.welcomeBack") ? <WelcomeBack percent={state.percent} /> : null}
           <div className="mt-5 max-w-none">
-            {blocks.map((block) => <LessonBlock key={block.id} block={block} />)}
+            {isAssessment ? <AssessmentPanel course={course} /> : isAcknowledgement ? <AcknowledgementPanel course={course} block={blocks.find((block) => block.type === "acknowledgement")} /> : blocks.map((block) => <LessonBlock key={block.id} block={block} courseId={course.id} lessonId={lesson.id} onComplete={completeActivity} />)}
           </div>
           <div className="mt-6 flex flex-wrap justify-between gap-3 border-t border-border pt-4">
             <button className="rounded-md border border-border px-3 py-2 text-sm" disabled={index === 0} onClick={() => navigate(`/learn/${course.id}/${lessons[index - 1].id}`)}>Previous</button>
-            {allLessonsDone ? <AssessmentPanel course={course} /> : <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" onClick={complete}>Mark Complete</button>}
+            {!lessonDone && !isAssessment && !isAcknowledgement ? <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={!canCompleteLesson} onClick={complete}>{canCompleteLesson ? "Complete & Continue" : "Complete Required Activity"}</button> : index < lessons.length - 1 ? <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" onClick={() => navigate(`/learn/${course.id}/${lessons[index + 1].id}`)}>Continue</button> : <Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to="/my-learning">Return to My Learning</Link>}
           </div>
         </Panel>
       </section>
+      <Panel className="xl:sticky xl:top-20 xl:h-[calc(100vh-6rem)] xl:overflow-auto">
+        <h2 className="font-semibold">Notes</h2>
+        <textarea className="mt-3 min-h-40 w-full rounded-md border border-border bg-transparent p-3 text-sm" placeholder="Write a private note..." value={note} onChange={(event) => void saveNote(event.target.value)} />
+        <h2 className="mt-5 font-semibold">Resources</h2>
+        <div className="mt-3 space-y-2">
+          {data.courseResources.filter((resource) => resource.courseId === course.id).map((resource) => <a key={resource.id} className="block rounded-md border border-border p-2 text-sm" href={resource.url?.startsWith("http") ? resource.url : undefined} target="_blank" rel="noreferrer"><FileText size={15} className="mr-2 inline" />{resource.title}</a>)}
+        </div>
+      </Panel>
     </div>
   );
 }
 
-function LessonBlock({ block }: { block: { type: string; title?: string; body?: string } }) {
-  const cls = block.type.includes("warning") ? "border-red-300 bg-red-50 dark:bg-red-950" : block.type.includes("compliance") ? "border-cyan-300 bg-cyan-50 dark:bg-cyan-950" : "border-border bg-slate-50 dark:bg-slate-900";
-  if (block.type === "divider") return <hr />;
-  return <div className={`mb-4 rounded-md border p-4 ${cls}`}><h3 className="mt-0 text-base font-semibold">{block.title}</h3><p>{block.body}</p></div>;
+function WelcomeBack({ percent }: { percent: number }) {
+  useEffect(() => {
+    sessionStorage.setItem("gridguard.welcomeBack", "1");
+  }, []);
+  return <div className="mt-4 rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900 dark:border-cyan-900 dark:bg-cyan-950 dark:text-cyan-100">Welcome back. You're {percent}% complete.</div>;
+}
+
+function sortedLessons(data: AppData, courseVersionId?: string) {
+  const modules = data.modules.filter((module) => module.courseVersionId === courseVersionId);
+  const modulePosition = new Map(modules.map((module) => [module.id, module.position]));
+  return data.lessons.filter((lesson) => lesson.courseVersionId === courseVersionId).sort((left, right) => (modulePosition.get(left.moduleId) ?? 0) - (modulePosition.get(right.moduleId) ?? 0) || left.position - right.position);
+}
+
+function moduleProgress(data: AppData, userId: string, moduleId: string) {
+  const lessons = data.lessons.filter((lesson) => lesson.moduleId === moduleId && lesson.required);
+  if (!lessons.length) return 0;
+  const done = lessons.filter((lesson) => data.lessonProgress.some((progress) => progress.userId === userId && progress.lessonId === lesson.id && progress.completedAt)).length;
+  return Math.round((done / lessons.length) * 100);
+}
+
+function LessonBlock({ block, courseId, lessonId, onComplete }: { block: ContentBlock; courseId: string; lessonId: string; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
+  const data = (block.data ?? {}) as Record<string, unknown>;
+  if (block.type === "divider") return <hr className="my-6 border-border" />;
+  if (block.type === "heading") return <h2 className="mb-4 text-2xl font-semibold">{block.body}</h2>;
+  if (["paragraph", "rich_text"].includes(block.type)) return <RichText body={block.body ?? ""} />;
+  if (block.type === "two_column" || block.type === "do_dont") return <TwoColumn data={data} />;
+  if (block.type === "learning_objectives") return <ListBlock title={block.title} items={(data.items as string[]) ?? []} />;
+  if (block.type === "procedure") return <ListBlock title={block.title} items={(data.steps as string[]) ?? []} numbered />;
+  if (block.type === "checklist") return <ChecklistBlock title={block.title} items={(data.items as string[]) ?? []} />;
+  if (block.type === "process_diagram") return <ProcessBlock title={block.title} stages={(data.stages as string[]) ?? []} caption={data.caption as string} />;
+  if (block.type === "timeline") return <TimelineBlock title={block.title} steps={(data.steps as string[]) ?? []} />;
+  if (block.type === "expandable") return <details className="mb-4 rounded-md border border-border p-4"><summary className="cursor-pointer font-semibold">{block.title}</summary><RichText body={block.body ?? ""} /></details>;
+  if (block.type === "knowledge_check") return <KnowledgeCheck block={block} />;
+  if (block.type === "classification" || block.type === "evidence_builder") return <ActivityBlock block={block} courseId={courseId} lessonId={lessonId} onComplete={onComplete} />;
+  if (block.type === "scenario" || block.type === "decision_exercise") return <ScenarioBlock block={block} onComplete={onComplete} />;
+  if (block.type === "role_cards" || block.type === "framework_cards") return <CardGrid block={block} />;
+  if (block.type === "record_card") return <RecordCard block={block} />;
+  if (block.type === "module_summary") return <ListBlock title={block.title} items={(data.items as string[]) ?? []} />;
+  const cls = block.type.includes("warning") ? "border-red-300 bg-red-50 dark:bg-red-950" : block.type.includes("compliance") || block.type.includes("audit") ? "border-cyan-300 bg-cyan-50 dark:bg-cyan-950" : "border-border bg-slate-50 dark:bg-slate-900";
+  return <div className={`mb-4 rounded-md border p-4 ${cls}`}><h3 className="mt-0 text-base font-semibold">{block.title ?? block.type.replaceAll("_", " ")}</h3><RichText body={block.body ?? ""} />{typeof data.note === "string" ? <p className="mt-3 text-sm italic text-muted-foreground">{data.note}</p> : null}</div>;
+}
+
+function RichText({ body }: { body: string }) {
+  return <div className="space-y-3 text-sm leading-6 text-muted-foreground">{body.split("\n\n").map((part, index) => part.trim().startsWith("*") ? <ul key={index} className="list-disc space-y-1 pl-5">{part.split("\n").filter(Boolean).map((line) => <li key={line}>{line.replace(/^\*\s*/, "")}</li>)}</ul> : <p key={index}>{part}</p>)}</div>;
+}
+
+function TwoColumn({ data }: { data: Record<string, unknown> }) {
+  return <div className="mb-4 grid gap-3 md:grid-cols-2">{[["leftTitle", "left"], ["rightTitle", "right"]].map(([titleKey, itemsKey]) => <div key={titleKey} className="rounded-md border border-border p-4"><h3 className="font-semibold">{data[titleKey] as string}</h3><ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">{((data[itemsKey] as string[]) ?? []).map((item) => <li key={item}>{item}</li>)}</ul></div>)}</div>;
+}
+
+function ListBlock({ title, items, numbered }: { title?: string; items: string[]; numbered?: boolean }) {
+  const Tag = numbered ? "ol" : "ul";
+  return <div className="mb-4 rounded-md border border-border bg-muted/30 p-4"><h3 className="font-semibold">{title}</h3><Tag className={`mt-2 space-y-1 pl-5 text-sm text-muted-foreground ${numbered ? "list-decimal" : "list-disc"}`}>{items.map((item) => <li key={item}>{item}</li>)}</Tag></div>;
+}
+
+function ChecklistBlock({ title, items }: { title?: string; items: string[] }) {
+  const [checked, setChecked] = useState<string[]>([]);
+  return <div className="mb-4 rounded-md border border-border p-4"><h3 className="font-semibold">{title}</h3><div className="mt-2 space-y-2">{items.map((item) => <label key={item} className="flex gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={checked.includes(item)} onChange={() => setChecked((current) => current.includes(item) ? current.filter((value) => value !== item) : [...current, item])} />{item}</label>)}</div></div>;
+}
+
+function ProcessBlock({ title, stages, caption }: { title?: string; stages: string[]; caption?: string }) {
+  return <div className="mb-4 rounded-md border border-border p-4"><h3 className="font-semibold">{title}</h3><div className="mt-3 grid gap-2 md:grid-cols-6">{stages.map((stage) => <div key={stage} className="rounded-md bg-cyan-50 p-3 text-center text-xs font-medium text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100">{stage}</div>)}</div>{caption ? <p className="mt-3 text-sm text-muted-foreground">{caption}</p> : null}</div>;
+}
+
+function TimelineBlock({ title, steps }: { title?: string; steps: string[] }) {
+  return <div className="mb-4 rounded-md border border-border p-4"><h3 className="font-semibold">{title}</h3><ol className="mt-3 space-y-3">{steps.map((step, index) => <li key={step} className="flex gap-3 text-sm"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-700 text-xs text-white">{index + 1}</span><span>{step}</span></li>)}</ol></div>;
+}
+
+function KnowledgeCheck({ block }: { block: ContentBlock }) {
+  const data = block.data as { question: string; answers: string[]; correct: number; correctFeedback: string; incorrectFeedback: string };
+  const [answer, setAnswer] = useState<number | null>(null);
+  const [submitted, setSubmitted] = useState(false);
+  const correct = submitted && answer === data.correct;
+  return <div className="mb-4 rounded-md border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-900 dark:bg-cyan-950"><h3 className="font-semibold">Knowledge Check</h3><p className="mt-2 text-sm">{data.question}</p><div className="mt-3 space-y-2">{data.answers.map((item, index) => <label key={item} className="flex gap-2 rounded-md border border-border bg-background p-2 text-sm"><input type="radio" name={block.id} checked={answer === index} onChange={() => setAnswer(index)} />{item}</label>)}</div><button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={answer === null} onClick={() => setSubmitted(true)}>Submit</button>{submitted ? <p className={`mt-3 rounded-md p-3 text-sm ${correct ? "bg-emerald-50 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200" : "bg-amber-50 text-amber-900 dark:bg-amber-950 dark:text-amber-100"}`}>{correct ? data.correctFeedback : data.incorrectFeedback}</p> : null}</div>;
+}
+
+function ActivityBlock({ block, onComplete }: { block: ContentBlock; courseId: string; lessonId: string; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
+  const { data, user } = useApp();
+  const saved = data.scenarioAttempts.find((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED");
+  const config = block.data as { instruction?: string; prompt?: string; categories?: string[]; items?: Array<{ text: string; correct: string }>; options?: string[]; correct?: number[]; success?: string; retry?: string };
+  const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
+  const [feedback, setFeedback] = useState("");
+  const check = async () => {
+    if (block.type === "classification") {
+      const ok = (config.items ?? []).every((item) => answers[item.text] === item.correct);
+      setFeedback(ok ? "Activity complete. You classified the access decisions correctly." : "Review each item against the person's current responsibilities, then try again.");
+      if (ok) await onComplete(block.id, answers, 100);
+    } else {
+      const selected = (config.options ?? []).map((_, index) => answers[String(index)] === true);
+      const ok = selected.every((value, index) => value === ((config.correct ?? []).includes(index)));
+      setFeedback(ok ? config.success ?? "Activity complete." : config.retry ?? "Review the selections and try again.");
+      if (ok) await onComplete(block.id, answers, 100);
+    }
+  };
+  return <div className="mb-4 rounded-md border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-900 dark:bg-cyan-950"><h3 className="font-semibold">{block.title}</h3><p className="mt-1 text-sm text-muted-foreground">{config.instruction ?? config.prompt}</p>{saved ? <p className="mt-3 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">Required activity complete.</p> : block.type === "classification" ? <div className="mt-3 space-y-3">{(config.items ?? []).map((item) => <div key={item.text} className="rounded-md border border-border bg-background p-3"><p className="text-sm font-medium">{item.text}</p><select aria-label={item.text} className="mt-2 rounded-md border border-border bg-transparent p-2 text-sm" value={(answers[item.text] as string) ?? ""} onChange={(event) => setAnswers((current) => ({ ...current, [item.text]: event.target.value }))}><option value="">Choose</option>{(config.categories ?? []).map((category) => <option key={category}>{category}</option>)}</select></div>)}</div> : <div className="mt-3 space-y-2">{(config.options ?? []).map((option, index) => <label key={option} className="flex gap-2 text-sm"><input type="checkbox" checked={answers[String(index)] === true} onChange={(event) => setAnswers((current) => ({ ...current, [String(index)]: event.target.checked }))} />{option}</label>)}</div>} {!saved ? <button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={check}>Check Record</button> : null}{feedback ? <p className="mt-3 text-sm">{feedback}</p> : null}</div>;
+}
+
+function ScenarioBlock({ block, onComplete }: { block: ContentBlock; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
+  const { data, user } = useApp();
+  const saved = data.scenarioAttempts.find((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id);
+  type ScenarioStepView = { question: string; options?: string[]; correct?: number | number[]; feedback?: string; table?: boolean; rows?: string[][]; multi?: boolean };
+  const config = block.data as { label?: string; situation?: string; steps?: ScenarioStepView[]; decisions?: Array<{ prompt: string; options: string[]; correct: number }>; result?: string; keyLesson?: string; instruction?: string };
+  const steps: ScenarioStepView[] = config.steps ?? (config.decisions ?? []).map((decision) => ({ question: decision.prompt, options: decision.options, correct: decision.correct }));
+  const [step, setStep] = useState(saved?.status === "COMPLETED" ? steps.length : Math.min(saved?.lastStep ?? 0, steps.length - 1));
+  const [answers, setAnswers] = useState<Record<string, unknown>>((saved?.answers as Record<string, unknown>) ?? {});
+  const [message, setMessage] = useState("");
+  const current = steps[step];
+  const complete = async () => {
+    await onComplete(block.id, answers, 100);
+    setStep(steps.length);
+  };
+  const submitStep = () => {
+    if (!current) return;
+    const value = answers[String(step)];
+    const ok = Array.isArray(current.correct) ? Array.isArray(value) && current.correct.every((index) => value.includes(index)) && value.length === current.correct.length : value === current.correct || (current.table && value);
+    setMessage(ok ? current.feedback ?? "Correct." : "Review the situation and choose the response that follows the approved process.");
+    if (ok) setTimeout(() => setStep((currentStep) => Math.min(currentStep + 1, steps.length)), 350);
+  };
+  if (step >= steps.length || saved?.status === "COMPLETED") return <div className="mb-4 rounded-md border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"><CheckCircle2 className="mb-2" /><h3 className="font-semibold">{block.type === "scenario" ? "Scenario Complete" : "Decision Exercise Complete"}</h3><p className="mt-2 text-sm">{config.result}</p>{config.keyLesson ? <p className="mt-2 text-sm font-medium">{config.keyLesson}</p> : null}</div>;
+  return <div className="mb-4 rounded-md border border-border p-4"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{config.label ?? "Required Activity"}</p><h3 className="mt-1 text-lg font-semibold">{block.title}</h3>{step === 0 ? <p className="mt-2 text-sm text-muted-foreground">{config.situation}</p> : null}<p className="mt-4 text-sm font-medium">Step {step + 1} of {steps.length}</p><p className="mt-2 text-sm">{current.question}</p>{current.table ? <div className="mt-3 space-y-2">{(current.rows ?? []).map((row: string[], index: number) => <div key={row[0]} className="grid gap-2 rounded-md border border-border p-3 text-sm md:grid-cols-4"><span>{row[0]}</span><span className="text-muted-foreground">{row[1]}</span><span className="text-muted-foreground">{row[2]}</span><select aria-label={row[0]} className="rounded-md border border-border bg-transparent p-2" onChange={(event) => setAnswers((value) => ({ ...value, [String(step)]: { ...(value[String(step)] as object), [index]: event.target.value } }))}><option>Choose</option><option>Keep</option><option>Review</option><option>Remove</option></select></div>)}</div> : current.multi ? <div className="mt-3 space-y-2">{(current.options ?? []).map((option, index) => <label key={option} className="flex gap-2 text-sm"><input type="checkbox" onChange={(event) => setAnswers((value) => ({ ...value, [String(step)]: event.target.checked ? [...((value[String(step)] as number[]) ?? []), index] : ((value[String(step)] as number[]) ?? []).filter((item) => item !== index) }))} />{option}</label>)}</div> : <div className="mt-3 space-y-2">{(current.options ?? []).map((option, index) => <label key={option} className="flex gap-2 rounded-md border border-border p-2 text-sm"><input type="radio" name={`${block.id}-${step}`} onChange={() => setAnswers((value) => ({ ...value, [String(step)]: index }))} />{option}</label>)}</div>}<div className="mt-4 flex gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" disabled={step === 0} onClick={() => setStep((value) => Math.max(0, value - 1))}>Back</button><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={step === steps.length - 1 ? complete : submitStep}>{step === steps.length - 1 ? "Complete Scenario" : "Continue"}</button></div>{message ? <p className="mt-3 rounded-md bg-muted p-3 text-sm">{message}</p> : null}</div>;
+}
+
+function CardGrid({ block }: { block: ContentBlock }) {
+  const cards = ((block.data as { cards?: Array<{ title?: string; body?: string; question?: string; items?: string[] } | [string, string]> })?.cards ?? []);
+  return <div className="mb-4 grid gap-3 md:grid-cols-2">{cards.map((card, index) => Array.isArray(card) ? <div key={card[0]} className="rounded-md border border-border p-4"><h3 className="font-semibold">{card[0]}</h3><p className="mt-1 text-sm text-muted-foreground">{card[1]}</p></div> : <div key={card.title ?? index} className="rounded-md border border-border p-4"><h3 className="font-semibold">{card.title}</h3>{card.body ? <p className="mt-1 text-sm text-muted-foreground">{card.body}</p> : null}{card.question ? <p className="mt-2 text-sm font-medium">{card.question}</p> : null}{card.items ? <ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{card.items.map((item) => <li key={item}>{item}</li>)}</ul> : null}</div>)}</div>;
+}
+
+function RecordCard({ block }: { block: ContentBlock }) {
+  const fields = ((block.data as { fields?: string[][] })?.fields ?? []);
+  return <div className="mb-4 rounded-md border border-border p-4"><div className="flex items-center justify-between"><h3 className="font-semibold">{block.title}</h3><span className="rounded-md bg-muted px-2 py-1 text-xs">Example</span></div><dl className="mt-3 grid gap-2 text-sm md:grid-cols-2">{fields.map(([label, value]) => <div key={label} className="rounded-md bg-muted/40 p-2"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="font-medium">{value}</dd></div>)}</dl></div>;
 }
 
 function AssessmentPanel({ course }: { course: Course }) {
   const { data, service, setData, toast } = useApp();
+  const navigate = useNavigate();
+  const user = useApp().user;
+  const state = getCourseCompletionState(data, user.id, course.id);
   const assessment = data.assessments.find((item) => item.courseVersionId === course.currentVersionId);
   const [started, setStarted] = useState(false);
+  const [current, setCurrent] = useState(0);
   const [answers, setAnswers] = useState<Record<string, unknown>>({});
-  const [result, setResult] = useState<number | null>(null);
+  const [flagged, setFlagged] = useState<string[]>([]);
+  const [result, setResult] = useState<{ score: number; passed: boolean; missedTopics?: string[]; correctCount?: number; totalQuestions?: number } | null>(null);
   if (!assessment) return null;
   const links = data.assessmentQuestions.filter((item) => item.assessmentId === assessment.id).sort((a, b) => a.position - b.position);
+  const questions = links.map((link) => data.questions.find((item) => item.id === link.questionId)!).filter(Boolean);
+  if (!state.canStartAssessment) return <LockedAssessment course={course} state={state} />;
   const submit = async () => {
     const svc = service();
     const attempt = await svc.submitAssessment(course.id, answers);
     setData(svc.snapshot());
-    setResult(attempt.score);
-    toast(attempt.passed ? "Course completed" : "Assessment submitted");
+    setResult(attempt);
+    toast(attempt.passed ? "Assessment passed" : "Assessment submitted");
   };
+  if (state.assessmentPassed && !started) return <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"><h2 className="font-semibold">Assessment Passed</h2><p className="mt-2 text-sm">Score: {state.score}%</p><button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => navigate(state.nextAction?.lessonId ? `/learn/${course.id}/${state.nextAction.lessonId}` : `/courses/${course.id}`)}>Continue to Acknowledgement</button></div>;
   if (!started) return <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" onClick={() => setStarted(true)}>Start Assessment</button>;
+  const question = questions[current];
+  const options = data.questionOptions.filter((item) => item.questionId === question.id).sort((left, right) => left.position - right.position);
+  const setAnswer = (questionValue: Question, value: string, checked?: boolean) => {
+    setAnswers((existing) => questionValue.type === "MULTIPLE_SELECT"
+      ? { ...existing, [questionValue.id]: checked ? [...((existing[questionValue.id] as string[]) ?? []), value] : ((existing[questionValue.id] as string[]) ?? []).filter((item) => item !== value) }
+      : { ...existing, [questionValue.id]: value });
+  };
+  if (result) return result.passed ? <AssessmentResultPass course={course} result={result} /> : <AssessmentResultFail course={course} result={result} />;
   return (
     <div className="w-full">
       <h2 className="text-lg font-semibold">{assessment.title}</h2>
-      <p className="text-sm text-muted-foreground">Passing score: {assessment.passingScore}%</p>
-      {links.map((link, qIndex) => {
-        const question = data.questions.find((item) => item.id === link.questionId)!;
-        const options = data.questionOptions.filter((item) => item.questionId === question.id);
-        return (
-          <div key={question.id} className="mt-4 rounded-md border border-border p-3">
-            <p className="font-medium">{qIndex + 1}. {question.prompt}</p>
-            <div className="mt-2 space-y-2">
-              {options.map((option) => <label key={option.id} className="flex gap-2 text-sm"><input type={question.type === "MULTIPLE_SELECT" ? "checkbox" : "radio"} name={question.id} onChange={() => setAnswers((current) => ({ ...current, [question.id]: option.id }))} /> {option.text}{option.match ? <span className="text-muted-foreground">→ {option.match}</span> : null}</label>)}
-              {question.type === "SHORT_ANSWER" ? <textarea className="w-full rounded-md border border-border bg-transparent p-2" onChange={(event) => setAnswers((current) => ({ ...current, [question.id]: event.target.value }))} /> : null}
-            </div>
-          </div>
-        );
-      })}
-      {result === null ? <button className="mt-4 rounded-md bg-cyan-700 px-4 py-2 text-sm text-white" onClick={submit}>Submit Assessment</button> : <p className="mt-4 rounded-md bg-emerald-50 p-3 text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">Score: {result}%. {result >= assessment.passingScore ? "Passed." : "Try again."}</p>}
+      <p className="text-sm text-muted-foreground">Question {current + 1} of {questions.length} · Passing score: {assessment.passingScore}%</p>
+      <div className="mt-4 rounded-md border border-border p-4">
+        <p className="font-medium">{question.prompt}</p>
+        <div className="mt-3 space-y-2">
+          {options.map((option) => <label key={option.id} className="flex gap-2 rounded-md border border-border p-2 text-sm"><input type={question.type === "MULTIPLE_SELECT" ? "checkbox" : "radio"} name={question.id} checked={question.type === "MULTIPLE_SELECT" ? ((answers[question.id] as string[]) ?? []).includes(option.id) : answers[question.id] === option.id} onChange={(event) => setAnswer(question, option.id, event.target.checked)} />{option.text}</label>)}
+        </div>
+      </div>
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-2">
+        <div className="flex gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" disabled={current === 0} onClick={() => setCurrent((value) => Math.max(0, value - 1))}>Previous</button><button className="rounded-md border border-border px-3 py-2 text-sm" disabled={current === questions.length - 1} onClick={() => setCurrent((value) => Math.min(questions.length - 1, value + 1))}>Next</button><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setFlagged((items) => items.includes(question.id) ? items.filter((item) => item !== question.id) : [...items, question.id])}>{flagged.includes(question.id) ? "Unflag" : "Flag for Review"}</button></div>
+        <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm text-white" onClick={submit}>Submit Assessment</button>
+      </div>
+      <div className="mt-3 flex flex-wrap gap-1">{questions.map((item, index) => <button key={item.id} className={`h-8 w-8 rounded-md border text-xs ${index === current ? "border-cyan-700 bg-cyan-50 text-cyan-900" : "border-border"}`} onClick={() => setCurrent(index)} aria-label={`Go to question ${index + 1}`}>{index + 1}</button>)}</div>
     </div>
   );
+}
+
+function LockedAssessment({ course, state }: { course: Course; state: ReturnType<typeof getCourseCompletionState> }) {
+  const navigate = useNavigate();
+  return <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"><AlertTriangle className="mb-2" /><h2 className="text-lg font-semibold">Final Assessment Locked</h2><p className="mt-2 text-sm">Complete the remaining required activities first.</p><ul className="mt-3 space-y-1 text-sm">{state.remainingItems.filter((item) => !["assessment", "acknowledgement"].includes(item)).map((item) => <li key={item}>□ {item.startsWith("block") ? "Required activity" : "Required lesson"}</li>)}</ul><button className="mt-4 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => navigate(state.nextAction?.lessonId ? `/learn/${course.id}/${state.nextAction.lessonId}` : `/courses/${course.id}`)}>Continue Required Training</button></div>;
+}
+
+function AssessmentResultPass({ course, result }: { course: Course; result: { score: number; correctCount?: number; totalQuestions?: number } }) {
+  const { data, user } = useApp();
+  const state = getCourseCompletionState(data, user.id, course.id);
+  return <div className="rounded-md border border-emerald-200 bg-emerald-50 p-4 text-emerald-900 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"><CheckCircle2 className="mb-2" /><h2 className="text-lg font-semibold">Assessment Passed</h2><div className="mt-3 grid gap-3 sm:grid-cols-4"><Info label="Score" value={`${result.score}%`} /><Info label="Passing Score" value="80%" /><Info label="Correct" value={`${result.correctCount ?? ""} of ${result.totalQuestions ?? ""}`} /><Info label="Attempt" value="Current" /></div><p className="mt-3 text-sm">Topics demonstrated: Personnel Responsibility, Access Authorization, Role Changes, Evidence, Training Records.</p><Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={state.nextAction?.lessonId ? `/learn/${course.id}/${state.nextAction.lessonId}` : `/courses/${course.id}`}>Continue to Acknowledgement</Link></div>;
+}
+
+function AssessmentResultFail({ course, result }: { course: Course; result: { score: number; missedTopics?: string[]; correctCount?: number; totalQuestions?: number } }) {
+  const topics = result.missedTopics?.length ? result.missedTopics : ["Access Changes", "Evidence"];
+  const lessonForTopic = (topic: string) => topic.includes("Evidence") ? "What Makes Evidence Audit-Ready?" : "Transfers, Promotions & Role Changes";
+  const { data } = useApp();
+  const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId);
+  return <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-amber-950 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"><AlertTriangle className="mb-2" /><h2 className="text-lg font-semibold">Additional Review Required</h2><div className="mt-3 grid gap-3 sm:grid-cols-3"><Info label="Score" value={`${result.score}%`} /><Info label="Passing" value="80%" /><Info label="Correct" value={`${result.correctCount ?? ""} of ${result.totalQuestions ?? ""}`} /></div><h3 className="mt-4 font-semibold">Recommended Review</h3><div className="mt-2 grid gap-2 md:grid-cols-2">{topics.map((topic) => { const lesson = lessons.find((item) => item.title === lessonForTopic(topic)); return <div key={topic} className="rounded-md border border-border bg-background p-3"><p className="font-medium">{topic}</p><p className="text-sm text-muted-foreground">Review: {lessonForTopic(topic)}</p>{lesson ? <Link className="mt-2 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={`/learn/${course.id}/${lesson.id}`}>Review Lesson</Link> : null}</div>; })}</div><button className="mt-4 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => location.reload()}>Retake Assessment</button></div>;
+}
+
+function AcknowledgementPanel({ course, block }: { course: Course; block?: ContentBlock }) {
+  const { data, user, service, setData, toast } = useApp();
+  const state = getCourseCompletionState(data, user.id, course.id);
+  const [checked, setChecked] = useState(false);
+  const submitted = data.acknowledgements.some((item) => item.userId === user.id && item.courseId === course.id && item.courseVersionId === course.currentVersionId);
+  const submit = async () => {
+    const svc = service();
+    await svc.submitAcknowledgement(course.id, block?.body ?? "");
+    setData(svc.snapshot());
+    toast("Course completed");
+  };
+  if (!state.assessmentPassed) return <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950">Complete and pass the final assessment before submitting the acknowledgement.</div>;
+  if (submitted || state.courseComplete) return <CompletionPanel course={course} />;
+  return <div className="rounded-md border border-border p-4"><h2 className="text-lg font-semibold">Learner Acknowledgement</h2><p className="mt-2 text-sm text-muted-foreground">Before completing the course, review and acknowledge the statement below.</p><div className="mt-4 whitespace-pre-line rounded-md bg-muted/40 p-4 text-sm leading-6">{block?.body}</div><div className="mt-4 grid gap-2 text-sm md:grid-cols-3"><Info label="Learner" value={user.name} /><Info label="Course" value={course.shortTitle ?? course.title} /><Info label="Date" value={new Date().toLocaleDateString()} /></div><label className="mt-4 flex gap-2 text-sm"><input type="checkbox" checked={checked} onChange={(event) => setChecked(event.target.checked)} />I have read and acknowledge the statement above.</label><button className="mt-4 rounded-md bg-cyan-700 px-4 py-2 text-sm text-white disabled:opacity-50" disabled={!checked} onClick={submit}>Submit Acknowledgement</button></div>;
+}
+
+function CompletionPanel({ course }: { course: Course }) {
+  const { data, user } = useApp();
+  const state = getCourseCompletionState(data, user.id, course.id);
+  const evidence = data.evidenceRecords.find((item) => item.userId === user.id && item.courseId === course.id);
+  const cert = data.userCertifications.find((item) => item.userId === user.id && item.courseId === course.id);
+  return <div className="rounded-md border border-emerald-200 bg-emerald-50 p-5 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"><p className="text-xs font-semibold uppercase tracking-wide">Training Complete</p><h2 className="mt-1 text-2xl font-semibold">You completed CIP-004 Personnel Security & Training</h2><p className="mt-2 text-sm">Your completion record, assessment result, acknowledgement, and certificate have been saved.</p><div className="mt-4 grid gap-3 md:grid-cols-4"><Info label="Lessons" value="9 / 9 Complete" /><Info label="Required Activities" value="3 / 3 Complete" /><Info label="Assessment" value={`${state.score ?? evidence?.assessmentScore ?? 0}% Passed`} /><Info label="Acknowledgement" value="Submitted" /></div><div className="mt-4 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/certifications">View Certificate</Link><Link className="rounded-md border border-emerald-300 px-3 py-2 text-sm" to={`/records/${course.id}`}>View Training Record</Link><Link className="rounded-md border border-emerald-300 px-3 py-2 text-sm" to="/my-learning">Return to My Learning</Link></div>{cert ? <p className="mt-3 text-sm">Certificate: {cert.certificateId}</p> : null}<CourseFeedback courseId={course.id} /></div>;
+}
+
+function CourseFeedback({ courseId }: { courseId: string }) {
+  const { data, user, setData, toast } = useApp();
+  const [rating, setRating] = useState(0);
+  const [comment, setComment] = useState("");
+  const submit = () => {
+    data.courseFeedback.push({ id: crypto.randomUUID(), userId: user.id, courseId, usefulness: rating, confidence: rating, comment, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    setData({ ...data });
+    toast("Feedback submitted");
+  };
+  return <div className="mt-5 rounded-md border border-emerald-300 p-4"><h3 className="font-semibold">How useful was this course?</h3><div className="mt-2 flex gap-1">{[1, 2, 3, 4, 5].map((value) => <button key={value} className={`rounded-md border px-2 py-1 ${rating >= value ? "bg-cyan-700 text-white" : ""}`} onClick={() => setRating(value)} aria-label={`${value} rating`}><Star size={15} /></button>)}</div><textarea className="mt-3 w-full rounded-md border border-border bg-transparent p-2 text-sm" placeholder="What would make this training more useful?" value={comment} onChange={(event) => setComment(event.target.value)} /><button className="mt-2 rounded-md border border-emerald-300 px-3 py-2 text-sm" disabled={!rating} onClick={submit}>Submit Feedback</button></div>;
+}
+
+function TrainingRecord() {
+  const { courseId } = useParams();
+  const { data, user } = useApp();
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course) return <NotFound />;
+  const version = data.courseVersions.find((item) => item.id === course.currentVersionId);
+  const enrollment = data.enrollments.find((item) => item.userId === user.id && item.courseId === course.id);
+  const evidence = data.evidenceRecords.find((item) => item.userId === user.id && item.courseId === course.id);
+  const cert = data.userCertifications.find((item) => item.userId === user.id && item.courseId === course.id);
+  return <><PageHeader title="Training Record" subtitle="Completed learner transcript detail." /><Panel><div className="grid gap-3 md:grid-cols-2"><Info label="Learner" value={user.name} /><Info label="Employee / learner identifier" value={user.id.slice(0, 12)} /><Info label="Course" value={course.title} /><Info label="Course version" value={version?.version ?? "1.0"} /><Info label="Standard" value="NERC CIP-004" /><Info label="Assignment date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Assigned"} /><Info label="Start date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Started"} /><Info label="Completion date" value={evidence?.completedAt ? new Date(evidence.completedAt).toLocaleDateString() : "Not complete"} /><Info label="Final assessment" value={`${evidence?.assessmentScore ?? "N/A"}%`} /><Info label="Passing score" value="80%" /><Info label="Attempts used" value={String(data.assessmentAttempts.filter((attempt) => attempt.userId === user.id && attempt.courseId === course.id).length || 1)} /><Info label="Scenario" value="Completed" /><Info label="Decision Exercise" value="Completed" /><Info label="Acknowledgement" value="Submitted" /><Info label="Certificate" value={cert?.certificateId ?? "Not issued"} /><Info label="Record status" value={evidence ? "Complete" : "In Progress"} /></div></Panel></>;
 }
 
 function QuestionBank() {

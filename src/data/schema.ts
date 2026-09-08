@@ -76,10 +76,18 @@ export interface Course extends BaseRecord {
   organizationId: string;
   slug: string;
   title: string;
+  shortTitle?: string;
+  subtitle?: string;
   shortDescription: string;
   category: string;
+  subcategory?: string;
   difficulty: string;
   estimatedMinutes: number;
+  delivery?: string;
+  language?: string;
+  recurrence?: string;
+  sequencing?: string;
+  audienceDescription?: string;
   status: CourseStatus;
   currentVersionId?: string;
   draftVersionId?: string;
@@ -172,6 +180,11 @@ export interface ContentBlock extends BaseRecord {
   title?: string;
   body?: string;
   data?: unknown;
+  configuration?: unknown;
+  required?: boolean;
+  mappedObjectiveIds?: string[];
+  mappedStandardReferenceIds?: string[];
+  estimatedInteractionTime?: number;
   position: number;
 }
 
@@ -359,6 +372,10 @@ export interface AssessmentAttempt extends BaseRecord {
   passed: boolean;
   submittedAt: string;
   attemptNumber: number;
+  answers?: Record<string, unknown>;
+  correctCount?: number;
+  totalQuestions?: number;
+  missedTopics?: string[];
 }
 
 export interface AssessmentAnswer extends BaseRecord {
@@ -390,8 +407,14 @@ export interface ScenarioStep extends BaseRecord {
 export interface ScenarioAttempt extends BaseRecord {
   scenarioId: string;
   userId: string;
+  courseId?: string;
+  courseVersionId?: string;
+  lessonId?: string;
   score: number;
   answers: unknown;
+  status?: "IN_PROGRESS" | "COMPLETED";
+  lastStep?: number;
+  completedAt?: string;
 }
 
 export interface Certification extends BaseRecord {
@@ -413,6 +436,7 @@ export interface UserCertification extends BaseRecord {
   userId: string;
   certificationId: string;
   courseId?: string;
+  courseVersionId?: string;
   certificateId: string;
   issuedAt: string;
   expiresAt: string;
@@ -456,17 +480,21 @@ export interface Approval extends BaseRecord {
 
 export interface EvidenceRecord extends BaseRecord {
   organizationId: string;
+  title?: string;
+  evidenceType?: string;
   userId: string;
   userDisplayName: string;
   courseId: string;
   courseTitle: string;
   courseVersionId: string;
   assignmentId?: string;
+  enrollmentId?: string;
   completedAt: string;
   assessmentScore?: number;
   certificationId?: string;
   certificateId?: string;
   acknowledgementText?: string;
+  source?: string;
   standardRefs: string[];
   status: EvidenceStatus;
   invalidationReason?: string;
@@ -474,8 +502,12 @@ export interface EvidenceRecord extends BaseRecord {
 
 export interface Acknowledgement extends BaseRecord {
   userId: string;
+  courseId?: string;
   courseVersionId: string;
   text: string;
+  acknowledgementVersion?: string;
+  submittedAt?: string;
+  status?: "SUBMITTED";
 }
 
 export interface Notification extends BaseRecord {

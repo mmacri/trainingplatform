@@ -1,5 +1,6 @@
 import { addDays, addMonths, subDays } from "date-fns";
 import type { AppData, Course, CourseStatus, QuestionType, Role } from "./schema";
+import { addFlagshipCip004Course } from "./flagshipCip004";
 
 const password = "GridGuard-Local-2026!";
 
@@ -376,25 +377,16 @@ export function createSeedData(): AppData {
     return course;
   };
 
-  const cip004 = addCourse({
-    title: "CIP-004 — Personnel & Training",
-    description: "Personnel risk, role-based training, access lifecycle controls, and training evidence for NERC CIP readiness.",
-    standard: "CIP-004",
-    accessMode: "ASSIGNMENT_ONLY",
-    duration: 60,
-    showInCatalog: true,
-    flagship: true,
-    certificate: "CIP-004 Personnel & Training Certificate",
-    modules: [
-      { title: "Personnel Risk", lessons: ["Personnel Risk Overview", "Access Eligibility"] },
-      { title: "Cybersecurity Awareness", lessons: ["Awareness Expectations", "Behavior and Accountability"] },
-      { title: "Role-Based Training", lessons: ["Role-Based Learning Plans", "Privileged Access Training"] },
-      { title: "Access Lifecycle", lessons: ["Authorization and Revocation", "Personnel Change Review"] },
-      { title: "Training Records & Evidence", lessons: ["Evidence Requirements", "Audit-Ready Records"] },
-      { title: "Personnel Change Scenario", lessons: ["Personnel Change Scenario"] },
-      { title: "Final Assessment", lessons: ["CIP-004 Assessment Preparation"] }
-    ]
+  const cip004 = addFlagshipCip004Course(data, {
+    organizationId: organization.id,
+    ownerId: manager.id,
+    reviewerId: compliance.id,
+    operationsTeamId: teamByName.Operations.id,
+    cipComplianceGroupId: groupByName["CIP Compliance"].id,
+    standardVersionId: getStandardVersion("CIP-004").id
   });
+  courseMap.set(cip004.title, cip004);
+  courseMap.set("CIP-004 — Personnel & Training", cip004);
 
   const morganDraft = addCourse({
     title: "NERC CIP-004 Personnel Training Annual Refresher",
@@ -554,7 +546,13 @@ export function createSeedData(): AppData {
   });
   data.assignments.push(assignment);
   data.assignmentAudiences.push(record("aud", { assignmentId: assignment.id, audienceType: "USER" as const, audienceId: learner.id }));
-  data.enrollments.push(record("enroll", { organizationId: organization.id, userId: learner.id, courseId: cip004.id, assignmentId: assignment.id, status: "IN_PROGRESS" as const, startedAt: iso(subDays(new Date(), 2)), lastAccessedAt: iso(), currentLessonId: data.lessons.find((l) => l.courseVersionId === cip004.currentVersionId)!.id }));
+  const cip004CurrentLesson = data.lessons.find((lesson) => lesson.courseVersionId === cip004.currentVersionId && lesson.title === "Transfers, Promotions & Role Changes")!;
+  data.enrollments.push(record("enroll", { organizationId: organization.id, userId: learner.id, courseId: cip004.id, assignmentId: assignment.id, status: "IN_PROGRESS" as const, startedAt: iso(subDays(new Date(), 6)), lastAccessedAt: iso(), currentLessonId: cip004CurrentLesson.id }));
+  const cip004CompletedLessons = new Set(["People Are Part of the Security Boundary", "Your Role in Compliance Readiness", "Personnel Risk Fundamentals", "Roles, Responsibilities & Escalation", "Access Authorization"]);
+  data.lessons
+    .filter((lesson) => lesson.courseVersionId === cip004.currentVersionId && cip004CompletedLessons.has(lesson.title))
+    .forEach((lesson) => data.lessonProgress.push(record("lessonprogress", { userId: learner.id, lessonId: lesson.id, completedAt: iso(subDays(new Date(), 1)) })));
+  data.courseProgress.push(record("progress", { userId: learner.id, courseId: cip004.id, courseVersionId: cip004.currentVersionId!, status: "IN_PROGRESS" as const, percentComplete: 46 }));
 
   const cip007Assignment = record("assign", {
     organizationId: organization.id,
@@ -645,7 +643,7 @@ export function createSeedData(): AppData {
   );
 
   data.notifications.push(
-    record("note", { userId: learner.id, type: "COURSE_ASSIGNED", title: "Training assigned", body: "CIP-004 Personnel & Training is due soon.", href: `/courses/${cip004.id}` }),
+    record("note", { userId: learner.id, type: "COURSE_ASSIGNED", title: "Training assigned", body: "CIP-004 Annual Refresher is due soon.", href: `/courses/${cip004.id}` }),
     record("note", { userId: author.id, type: "REVIEW_COMMENT", title: "Review comment", body: "A reviewer requested an evidence example.", href: `/build/courses/${reviewCourse.id}` }),
     record("note", { userId: compliance.id, type: "STANDARD_CHANGE", title: "Standard change review", body: "CIP-015 impact review is due this month.", href: "/standards" })
   );

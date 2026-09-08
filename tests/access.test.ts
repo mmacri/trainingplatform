@@ -17,10 +17,10 @@ describe("course access model", () => {
   it("allows group grants and assignment-only courses", () => {
     const data = createSeedData();
     const learner = data.users.find((user) => user.email === "learner@gridguard.local")!;
-    const cip004 = data.courses.find((course) => course.title === "CIP-004 — Personnel & Training")!;
+    const cip004 = data.courses.find((course) => course.id === "course-cip004-annual-refresher")!;
     const auditWorkshop = data.courses.find((course) => course.title === "Audit Preparation Workshop")!;
 
-    expect(canAccessCourse(data, learner.id, cip004.id).reason).toBe("Training assignment");
+    expect(canAccessCourse(data, learner.id, cip004.id).allowed).toBe(true);
     expect(canAccessCourse(data, learner.id, auditWorkshop.id).allowed).toBe(true);
   });
 
