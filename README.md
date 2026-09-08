@@ -8,7 +8,7 @@ GridGuard Learning is a GitHub Pages-ready NERC CIP training, course-authoring, 
 - Browser-local users, roles, teams, groups, course access grants, assignments, progress, assessments, certificates, evidence, reviews, standards, audit events, notifications, backups, and settings.
 - NERC CIP academy seed content from CIP-002 through CIP-015.
 - Fully populated flagship courses for CIP-004 Personnel & Training and Annual NERC CIP Cybersecurity Awareness.
-- Course Studio for creating, editing, previewing, publishing, duplicating, archiving, exporting, and restricting courses.
+- Course Management for creating, editing, reviewing, publishing, assigning, monitoring, duplicating, archiving, exporting, and restricting courses.
 - Access request workflow with owner approval and automatic user grants.
 - Compliance dashboards, standards registry, evidence records, reports, and audit log.
 - Full backup export/import, demo restore, browser storage health, dark mode, offline indicator, and installable PWA manifest.

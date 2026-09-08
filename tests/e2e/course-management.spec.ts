@@ -33,7 +33,7 @@ test.beforeEach(async ({ page }) => {
   await resetBrowserData(page);
 });
 
-test("course manager creates a course and opens Course Studio", async ({ page }) => {
+test("course manager creates a course and opens the lifecycle workspace", async ({ page }) => {
   await login(page, "manager@gridguard.local");
   await page.getByRole("link", { name: /Course Management/ }).click();
   await expect(page.getByRole("heading", { name: "Course Management" })).toBeVisible();
@@ -85,6 +85,8 @@ test("approved course publishes and can be assigned", async ({ page }) => {
   await page.getByText("Operations — TEAM").click();
   for (let index = 0; index < 3; index += 1) await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Assign Training" }).click();
+  await expect(page.getByRole("heading", { name: "Training Assigned" })).toBeVisible();
+  await page.getByRole("link", { name: "Monitor Progress" }).click();
   await expect(page.getByRole("button", { name: "analytics" })).toBeVisible();
 });
 

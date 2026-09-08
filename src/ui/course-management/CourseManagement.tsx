@@ -24,7 +24,7 @@ import {
   X
 } from "lucide-react";
 import { addDays, format, formatDistanceToNow } from "date-fns";
-import { useEffect, useMemo, useState, type FormEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Bar, BarChart, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import type { AppData, ContentBlock, Course, CourseAccessGrant, CourseStatus, Lesson, Module, QuestionType, Review } from "../../data/schema";
@@ -150,7 +150,9 @@ function ownerName(data: AppData, course: Course) {
 export function CourseManagementDashboard() {
   const { data, user, toast, service, refresh } = useApp();
   const navigate = useNavigate();
+  const importInput = useRef<HTMLInputElement>(null);
   const [view, setView] = useState(localStorage.getItem("gridguard.courseView") || (window.innerWidth < 900 ? "cards" : "table"));
+  const [overflowOpen, setOverflowOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<"ALL" | CourseStatus>("ALL");
   const [standard, setStandard] = useState("ALL");
@@ -216,6 +218,95 @@ export function CourseManagementDashboard() {
     toast("Course archived");
   };
 
+  const restore = async (course: Course) => {
+    await service().restoreCourse(course.id);
+    await refresh();
+    toast("Course restored");
+  };
+
+  const exportCatalog = () => {
+    const rows = ["Title,Status,Standard,Owner,Learners,Completion"];
+    courses.forEach((course) => {
+      rows.push(
+        [
+          csvCell(course.title),
+          csvCell(statusLabels[course.status]),
+          csvCell(standardLabel(data, course.id)),
+          csvCell(ownerName(data, course)),
+          data.enrollments.filter((item) => item.courseId === course.id).length,
+          `${completionRate(data, [course.id])}%`
+        ].join(",")
+      );
+    });
+    downloadBlob("gridguard-course-catalog.csv", rows.join("\n"), "text/csv");
+    toast("Course catalog exported");
+  };
+
+  const importCourse = async (file?: File) => {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text()) as {
+        course?: Course;
+        modules?: Module[];
+        lessons?: Lesson[];
+      };
+      if (!parsed.course?.title) throw new Error("Invalid course package.");
+      const moduleInputs = (parsed.modules ?? [])
+        .sort((left, right) => left.position - right.position)
+        .map((module) => ({
+          title: module.title,
+          lessons: (parsed.lessons ?? [])
+            .filter((lesson) => lesson.moduleId === module.id)
+            .sort((left, right) => left.position - right.position)
+            .map((lesson) => lesson.title)
+        }));
+      const imported = await service().createCourseDraft({
+        title: `${parsed.course.title} Import`,
+        description: parsed.course.shortDescription || "Imported course package.",
+        category: parsed.course.category || "NERC CIP",
+        difficulty: parsed.course.difficulty || "Foundational",
+        estimatedMinutes: parsed.course.estimatedMinutes || 45,
+        icon: parsed.course.icon || "ShieldCheck",
+        accent: parsed.course.accent || "#0e7490",
+        coverVisual: parsed.course.coverVisual,
+        accessMode: "PRIVATE",
+        showInCatalog: false,
+        allowSelfEnrollment: false,
+        allowAccessRequests: false,
+        requireManagerApproval: false,
+        standardVersionIds: data.standardVersions[0] ? [data.standardVersions[0].id] : [],
+        objectives: ["Review imported course structure and update compliance mapping."],
+        skillIds: [],
+        completionEvidence: ["Course completion"],
+        audienceGrants: [],
+        modules: moduleInputs.length ? moduleInputs : [{ title: "Imported Module", lessons: ["Imported Lesson"] }],
+        completion: {
+          requireAllLessons: true,
+          requireFinalAssessment: false,
+          requireScenarios: false,
+          requireAcknowledgement: false,
+          requireManagerValidation: false,
+          finalAssessmentEnabled: false,
+          passingScore: 80,
+          attemptsAllowed: 3,
+          failedAttemptBehavior: "RETRY_IMMEDIATELY",
+          randomizeQuestions: false,
+          randomizeAnswers: false,
+          showAnswersAfterAttempt: true,
+          certificateEnabled: false,
+          certificateName: "NERC CIP Training Completion"
+        }
+      });
+      await refresh();
+      toast("Course package imported");
+      navigate(`/build/courses/${imported.id}`);
+    } catch {
+      toast("This course package could not be read");
+    } finally {
+      if (importInput.current) importInput.current.value = "";
+    }
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -225,10 +316,21 @@ export function CourseManagementDashboard() {
           <p className="text-sm text-muted-foreground">Create, review, publish, assign, and monitor training from one workspace.</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => toast("Import course package opens the course import workflow from Data Management.")}>Import Course</button>
-          <button className="rounded-md border border-border p-2" aria-label="Course management menu" onClick={() => toast("Course catalog export is available from Reports and Data Management.")}>
+          <input ref={importInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => importCourse(event.target.files?.[0])} />
+          <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => importInput.current?.click()}>Import Course</button>
+          <div className="relative">
+          <button className="rounded-md border border-border p-2" aria-label="Course management menu" onClick={() => setOverflowOpen((open) => !open)}>
             <MoreHorizontal size={18} />
           </button>
+          {overflowOpen ? (
+            <div className="absolute right-0 top-11 z-30 w-56 rounded-md border border-border bg-white p-2 shadow-soft dark:bg-slate-950">
+              <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOverflowOpen(false); importInput.current?.click(); }}>Import course package</button>
+              <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOverflowOpen(false); exportCatalog(); }}>Export course catalog</button>
+              <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOverflowOpen(false); navigate("/build/questions"); }}>Manage question bank</button>
+              <button className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOverflowOpen(false); setStatus("ARCHIVED"); }}>View archived courses</button>
+            </div>
+          ) : null}
+          </div>
           <Link className="inline-flex items-center gap-2 rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white hover:bg-cyan-800" to="/build/new">
             <Plus size={16} /> Create Course
           </Link>
@@ -317,7 +419,7 @@ export function CourseManagementDashboard() {
         {view === "cards" ? (
           <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {filtered.map((course) => (
-              <CourseCard key={course.id} course={course} data={data} onDuplicate={() => duplicate(course)} onArchive={() => archive(course)} />
+              <CourseCard key={course.id} course={course} data={data} onDuplicate={() => duplicate(course)} onArchive={() => course.status === "ARCHIVED" ? restore(course) : archive(course)} />
             ))}
           </div>
         ) : (
@@ -355,6 +457,7 @@ export function CourseManagementDashboard() {
                           if (action === "analytics") navigate(`/build/courses/${course.id}?tab=analytics`);
                           if (action === "activity") navigate(`/build/courses/${course.id}?tab=activity`);
                           if (action === "archive") await archive(course);
+                          if (action === "restore") await restore(course);
                         }}>
                           <option value="" disabled>•••</option>
                           <option value="edit">Edit Course</option>
@@ -364,7 +467,7 @@ export function CourseManagementDashboard() {
                           <option value="assign">Assignments</option>
                           <option value="analytics">Analytics</option>
                           <option value="activity">Activity History</option>
-                          <option value="archive">Archive</option>
+                          {course.status === "ARCHIVED" ? <option value="restore">Restore Course</option> : <option value="archive">Archive</option>}
                         </select>
                       </td>
                     </tr>
@@ -401,7 +504,7 @@ function CourseCard({ course, data, onDuplicate, onArchive }: { course: Course; 
       <div className="mt-4 flex flex-wrap gap-2">
         <Link className="rounded-md bg-cyan-700 px-3 py-1.5 text-sm text-white" to={`/build/courses/${course.id}`}>Open</Link>
         <button className="rounded-md border border-border px-3 py-1.5 text-sm" onClick={onDuplicate}>Duplicate</button>
-        <button className="rounded-md border border-border px-3 py-1.5 text-sm" onClick={onArchive}>Archive</button>
+        <button className="rounded-md border border-border px-3 py-1.5 text-sm" onClick={onArchive}>{course.status === "ARCHIVED" ? "Restore" : "Archive"}</button>
       </div>
     </div>
   );
@@ -1293,7 +1396,7 @@ function AssessmentTab({ course }: { course: Course }) {
   if (!assessment) return <Panel><EmptyState title="No assessment configured" body="Enable the final assessment in Completion to begin adding questions." /></Panel>;
   return (
     <Panel>
-      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Final Assessment</h2><div className="flex gap-2"><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={addQuestion}>Add Question</button><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => toast("Question Bank opened from Course Management menu.")}>Import from Question Bank</button></div></div>
+      <div className="flex flex-wrap items-center justify-between gap-2"><h2 className="font-semibold">Final Assessment</h2><div className="flex gap-2"><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={addQuestion}>Add Question</button><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/build/questions">Import from Question Bank</Link></div></div>
       <div className="mt-4 grid gap-3 md:grid-cols-4"><StatMini label="Questions" value={links.length} /><StatMini label="Passing Score" value={`${assessment.passingScore}%`} /><StatMini label="Attempts" value={assessment.maxAttempts} /><StatMini label="Estimated Time" value={`${Math.max(5, links.length * 2)}m`} /></div>
       <div className="mt-4 space-y-2">
         {links.map((link) => {
@@ -1536,6 +1639,20 @@ function exportCourse(data: AppData, courseId: string) {
   URL.revokeObjectURL(url);
 }
 
+function csvCell(value: unknown) {
+  return `"${String(value ?? "").replaceAll("\"", "\"\"")}"`;
+}
+
+function downloadBlob(fileName: string, text: string, type: string) {
+  const blob = new Blob([text], { type });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.click();
+  URL.revokeObjectURL(url);
+}
+
 export function AssignmentWizard() {
   const { data, service, refresh, toast } = useApp();
   const { courseId = "" } = useParams();
@@ -1546,6 +1663,7 @@ export function AssignmentWizard() {
   const [dueOption, setDueOption] = useState("30");
   const [recurrence, setRecurrence] = useState<"NONE" | "ANNUAL">("NONE");
   const [notifyLearners, setNotifyLearners] = useState(true);
+  const [assignedCount, setAssignedCount] = useState<number | null>(null);
   if (!course) return <Panel>Course not found.</Panel>;
   const learnerCount = resolveLearnerCount(data, audiences);
   const dueAt = dueOption === "none" ? addDays(new Date(), 3650) : addDays(new Date(), Number(dueOption));
@@ -1553,8 +1671,22 @@ export function AssignmentWizard() {
     await service().createAssignment(course.id, audiences.map(({ audienceType, audienceId }) => ({ audienceType, audienceId })), dueAt.toISOString(), recurrence, { notifyLearners, reminder7: true, reminder3: true, dueDate: true, managerOverdue: true });
     await refresh();
     toast("Training assigned");
-    navigate(`/build/courses/${course.id}?tab=analytics`);
+    setAssignedCount(learnerCount);
   };
+  if (assignedCount !== null) {
+    return (
+      <Panel className="mx-auto max-w-2xl text-center">
+        <CheckCircle2 className="mx-auto text-emerald-600" size={46} />
+        <h1 className="mt-3 text-2xl font-semibold">Training Assigned</h1>
+        <p className="mt-2 text-sm text-muted-foreground">{course.title} has been assigned to {assignedCount} learner{assignedCount === 1 ? "" : "s"}.</p>
+        <div className="mt-5 flex flex-wrap justify-center gap-2">
+          <Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/build/courses/${course.id}?tab=analytics`}>Monitor Progress</Link>
+          <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => { setAssignedCount(null); setStep(1); }}>Assign More Learners</button>
+          <Link className="rounded-md border border-border px-3 py-2 text-sm" to={`/build/courses/${course.id}`}>Return to Course</Link>
+        </div>
+      </Panel>
+    );
+  }
   return (
     <div className="space-y-5">
       <div><Breadcrumbs items={[{ label: "Course Management", href: "/build" }, { label: course.title, href: `/build/courses/${course.id}` }, { label: "Assign Training" }]} /><h1 className="text-2xl font-semibold">Assign Training</h1></div>
