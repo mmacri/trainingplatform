@@ -326,12 +326,14 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/" element={<Navigate to="/home" replace />} />
             <Route path="/home" element={<HomeDashboard />} />
             <Route path="/my-learning" element={<MyLearning />} />
+            <Route path="/learning" element={<LearningCatalog />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/learning-paths" element={<LearningPaths />} />
             <Route path="/certifications" element={<Certifications />} />
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/courses/:courseId" element={<CourseLanding />} />
             <Route path="/learn/:courseId/:lessonId?" element={<CoursePlayer onNotes={() => setNotesOpen(true)} />} />
+            <Route path="/resources/:resourceId" element={<ResourceDetail />} />
             <Route path="/records/:courseId" element={<TrainingRecord />} />
             <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
             <Route path="/build/new" element={<Guard allow={canCreateCourses(data, user.id)} label="Create Course"><CourseCreationWizard /></Guard>} />
@@ -366,7 +368,7 @@ function buildNav(data: AppData, userId: string) {
   const items = [
     { label: "Home", href: "/home", icon: Home },
     { label: "My Learning", href: "/my-learning", icon: GraduationCap },
-    { label: "Catalog", href: "/library", icon: Library },
+    { label: "Catalog", href: "/learning", icon: Library },
     { label: "Learning Paths", href: "/learning-paths", icon: BookOpenCheck },
     { label: "Certifications", href: "/certifications", icon: FileCheck2 },
     { label: "Skills", href: "/skills", icon: CheckCircle2 }
@@ -461,7 +463,7 @@ function HomeDashboard() {
           <h2 className="text-lg font-semibold">Continue Learning</h2>
           <div className="mt-3 space-y-3">
             {required.filter((course) => data.enrollments.some((enrollment) => enrollment.courseId === course.id && enrollment.status !== "COMPLETED")).map((course) => <CourseRow key={course.id} course={course} />)}
-            {required.length === 0 ? <EmptyState text="You're all caught up." action="Browse Library" href="/library" /> : null}
+            {required.length === 0 ? <EmptyState text="You're all caught up." action="Browse Catalog" href="/learning" /> : null}
           </div>
         </Panel>
         <div className="space-y-5">
@@ -522,7 +524,7 @@ function MyLearning() {
       <div className="mt-4 grid gap-4 lg:grid-cols-2">
         {filtered.map((enrollment) => <CourseCard key={enrollment.id} course={data.courses.find((course) => course.id === enrollment.courseId)!} />)}
       </div>
-      {!filtered.length ? <EmptyState text="You're all caught up." action="Browse Library" href="/library" /> : null}
+      {!filtered.length ? <EmptyState text="You're all caught up." action="Browse Catalog" href="/learning" /> : null}
     </>
   );
 }
@@ -550,6 +552,114 @@ function LibraryPage() {
       {!visible.length ? <EmptyState text="No courses match your filters." action="Clear Filters" onClick={() => { setQuery(""); setCategory("All"); }} /> : null}
     </>
   );
+}
+
+function LearningCatalog() {
+  const { data, user } = useApp();
+  const [tab, setTab] = useState("Catalog");
+  const [query, setQuery] = useState("");
+  const [standard, setStandard] = useState("All");
+  const [difficulty, setDifficulty] = useState("All");
+  const enrollments = data.enrollments.filter((item) => item.userId === user.id);
+  const visibleCourses = data.courses.filter((course) => {
+    const access = canAccessCourse(data, user.id, course.id);
+    const version = data.courseVersions.find((item) => item.id === course.currentVersionId);
+    const lessonText = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId).map((lesson) => lesson.title).join(" ");
+    const searchText = [course.title, course.shortDescription, course.subtitle, course.subcategory, version?.goal, lessonText].join(" ").toLowerCase();
+    return (access.allowed || access.discoverable)
+      && course.showInCatalog
+      && (standard === "All" || course.title.includes(standard) || course.subcategory === standard)
+      && (difficulty === "All" || course.difficulty === difficulty)
+      && (!query || searchText.includes(query.toLowerCase()));
+  });
+  const assignedCourses = enrollments.map((enrollment) => data.courses.find((course) => course.id === enrollment.courseId)).filter(Boolean) as Course[];
+  const completedCourses = enrollments.filter((enrollment) => enrollment.status === "COMPLETED").map((enrollment) => data.courses.find((course) => course.id === enrollment.courseId)).filter(Boolean) as Course[];
+  const continueCourse = assignedCourses.find((course) => getCourseCompletionState(data, user.id, course.id).percent > 0 && getCourseCompletionState(data, user.id, course.id).percent < 100);
+  const dueSoon = enrollments
+    .map((enrollment) => ({ enrollment, assignment: data.assignments.find((assignment) => assignment.id === enrollment.assignmentId), course: data.courses.find((course) => course.id === enrollment.courseId) }))
+    .filter((item) => item.assignment && item.course && new Date(item.assignment.dueAt).getTime() > Date.now())
+    .sort((left, right) => new Date(left.assignment!.dueAt).getTime() - new Date(right.assignment!.dueAt).getTime())[0];
+  const standards = Array.from(new Set(data.courses.map((course) => course.subcategory).filter(Boolean))).sort();
+  const domainCount = new Set(data.courseStandardMappings.map((mapping) => data.standardVersions.find((version) => version.id === mapping.standardVersionId)?.standardId).filter(Boolean)).size;
+  const certificateCount = data.courses.filter((course) => course.certificateEnabled && course.showInCatalog).length;
+  const clearFilters = () => {
+    setQuery("");
+    setStandard("All");
+    setDifficulty("All");
+  };
+  const activeCourses = tab === "My Learning" ? assignedCourses : tab === "Completed" ? completedCourses : visibleCourses;
+  return (
+    <>
+      <PageHeader title="Learning Catalog" subtitle="NERC CIP training designed around practical responsibilities, operational decisions, and evidence readiness." />
+      <Panel>
+        <div className="grid gap-4 lg:grid-cols-[1fr_340px]">
+          <div>
+            <h2 className="text-xl font-semibold">Learning Catalog</h2>
+            <p className="mt-2 max-w-3xl text-sm leading-6 text-muted-foreground">Build knowledge across the NERC CIP lifecycle, from asset categorization and access controls to incident response, recovery, supply chain, and audit readiness.</p>
+          </div>
+          <div className="grid grid-cols-2 gap-2 text-sm">
+            <Info label="Courses" value={visibleCourses.length} />
+            <Info label="CIP Domains" value={domainCount} />
+            <Info label="Learning Paths" value={data.learningPaths.length} />
+            <Info label="Certificates" value={certificateCount} />
+          </div>
+        </div>
+      </Panel>
+      {continueCourse || dueSoon ? (
+        <div className="mt-5 grid gap-4 lg:grid-cols-3">
+          {continueCourse ? <Panel><p className="text-sm font-semibold text-cyan-700">Continue Learning</p><h3 className="mt-2 font-semibold">{continueCourse.title}</h3><p className="mt-1 text-sm text-muted-foreground">{getCourseCompletionState(data, user.id, continueCourse.id).percent}% complete</p><Link className="mt-3 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={getCourseCompletionState(data, user.id, continueCourse.id).resumeDestination}>Resume Course</Link></Panel> : null}
+          <Panel><p className="text-sm font-semibold text-cyan-700">Recommended Next</p><h3 className="mt-2 font-semibold">{data.learningPaths[0]?.title ?? "NERC CIP Foundations"}</h3><p className="mt-1 text-sm text-muted-foreground">Follow the next course in your learning path.</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to="/learning-paths">View Path</Link></Panel>
+          {dueSoon?.course && dueSoon.assignment ? <Panel><p className="text-sm font-semibold text-amber-700">Due Soon</p><h3 className="mt-2 font-semibold">{dueSoon.course.title}</h3><p className="mt-1 text-sm text-muted-foreground">Due {new Date(dueSoon.assignment.dueAt).toLocaleDateString()}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={`/courses/${dueSoon.course.id}`}>Open Course</Link></Panel> : null}
+        </div>
+      ) : null}
+      <div className="mt-5">
+        <Tabs items={["My Learning", "Catalog", "Learning Paths", "Completed", "Transcript"]} active={tab} onChange={setTab} />
+      </div>
+      {tab === "Learning Paths" ? <div className="mt-4 grid gap-4 lg:grid-cols-2">{data.learningPaths.map((path) => <Panel key={path.id}><h2 className="font-semibold">{path.title}</h2><p className="mt-2 text-sm text-muted-foreground">{path.description}</p><p className="mt-3 text-sm">Courses: {data.learningPathCourses.filter((item) => item.learningPathId === path.id).length}</p></Panel>)}</div> : null}
+      {tab === "Transcript" ? <TranscriptPanel /> : null}
+      {tab !== "Learning Paths" && tab !== "Transcript" ? (
+        <>
+          <div className="mt-5 flex flex-wrap gap-3">
+            <input className="h-10 min-w-72 rounded-md border border-border bg-transparent px-3" placeholder="Search courses, standards, skills, or topics" value={query} onChange={(event) => setQuery(event.target.value)} />
+            <select className="h-10 rounded-md border border-border bg-transparent px-3" value={standard} onChange={(event) => setStandard(event.target.value)}>
+              {["All", ...standards].map((item) => <option key={item}>{item}</option>)}
+            </select>
+            <select className="h-10 rounded-md border border-border bg-transparent px-3" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}>
+              {["All", "Foundational", "Intermediate", "Advanced"].map((item) => <option key={item}>{item}</option>)}
+            </select>
+            <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={clearFilters}>Clear filters</button>
+          </div>
+          <p className="mt-3 text-sm text-muted-foreground">{activeCourses.length} course{activeCourses.length === 1 ? "" : "s"} shown</p>
+          <div className="mt-4 grid gap-4 xl:grid-cols-3">
+            {activeCourses.map((course) => <CourseCard key={course.id} course={course} />)}
+          </div>
+          {!activeCourses.length ? <EmptyState text={tab === "My Learning" ? "You're caught up." : "No courses match these filters."} action={tab === "My Learning" ? "Browse Catalog" : "Clear Filters"} onClick={tab === "My Learning" ? () => setTab("Catalog") : clearFilters} /> : null}
+        </>
+      ) : null}
+    </>
+  );
+}
+
+function TranscriptPanel() {
+  const { data, user } = useApp();
+  const rows = data.enrollments
+    .filter((enrollment) => enrollment.userId === user.id)
+    .map((enrollment) => {
+      const course = data.courses.find((item) => item.id === enrollment.courseId);
+      const version = data.courseVersions.find((item) => item.id === course?.currentVersionId);
+      const evidence = data.evidenceRecords.find((item) => item.userId === user.id && item.courseId === enrollment.courseId);
+      const cert = data.userCertifications.find((item) => item.userId === user.id && item.courseId === enrollment.courseId);
+      return [
+        course?.title ?? "Unknown course",
+        version?.version ?? "1.0",
+        enrollment.status,
+        evidence?.assessmentScore ? `${evidence.assessmentScore}%` : "N/A",
+        evidence?.completedAt ? new Date(evidence.completedAt).toLocaleDateString() : "In progress",
+        cert?.certificateId ?? "Not issued",
+        course ? <Link key={course.id} className="text-cyan-700" to={`/records/${course.id}`}>Training Record</Link> : ""
+      ];
+    });
+  return <Panel className="mt-4"><Table headers={["Course", "Version", "Status", "Assessment", "Completed", "Certificate", "Record"]} rows={rows} /></Panel>;
 }
 
 function CourseCard({ course }: { course: Course }) {
@@ -663,7 +773,10 @@ function CourseLanding() {
           <div className="mt-5">
             <h3 className="text-sm font-semibold">To complete this course</h3>
             <ul className="mt-2 space-y-2 text-sm text-muted-foreground">
-              {["Complete all required lessons.", "Complete all required knowledge checks.", "Complete the interactive Role Change scenario.", "Complete the Access Termination decision exercise.", "Score at least 80% on the final assessment.", "Complete the learner acknowledgement."].map((item) => <li key={item}>• {item}</li>)}
+              {(hero
+                ? ["Complete all required lessons.", "Complete all required knowledge checks.", "Complete the interactive Role Change scenario.", "Complete the Access Termination decision exercise.", "Score at least 80% on the final assessment.", "Complete the learner acknowledgement."]
+                : ["Complete all required lessons.", "Complete required practice activities.", "Score at least 80% on the final assessment.", course.certificateEnabled ? "Certificate issued after completion." : "Completion record issued after completion."]
+              ).map((item) => <li key={item}>• {item}</li>)}
             </ul>
           </div>
         </Panel>
@@ -754,10 +867,38 @@ function CoursePlayer({ onNotes }: { onNotes: () => void }) {
         <textarea className="mt-3 min-h-40 w-full rounded-md border border-border bg-transparent p-3 text-sm" placeholder="Write a private note..." value={note} onChange={(event) => void saveNote(event.target.value)} />
         <h2 className="mt-5 font-semibold">Resources</h2>
         <div className="mt-3 space-y-2">
-          {data.courseResources.filter((resource) => resource.courseId === course.id).map((resource) => <a key={resource.id} className="block rounded-md border border-border p-2 text-sm" href={resource.url?.startsWith("http") ? resource.url : undefined} target="_blank" rel="noreferrer"><FileText size={15} className="mr-2 inline" />{resource.title}</a>)}
+          {data.courseResources.filter((resource) => resource.courseId === course.id).map((resource) => resource.url?.startsWith("http")
+            ? <a key={resource.id} className="block rounded-md border border-border p-2 text-sm" href={resource.url} target="_blank" rel="noreferrer"><FileText size={15} className="mr-2 inline" />{resource.title}</a>
+            : <Link key={resource.id} className="block rounded-md border border-border p-2 text-sm" to={`/resources/${resource.id}`}><FileText size={15} className="mr-2 inline" />{resource.title}</Link>)}
         </div>
       </Panel>
     </div>
+  );
+}
+
+function ResourceDetail() {
+  const { resourceId } = useParams();
+  const { data } = useApp();
+  const resource = data.courseResources.find((item) => item.id === resourceId);
+  if (!resource) return <NotFound />;
+  const course = data.courses.find((item) => item.id === resource.courseId);
+  const standard = course?.subcategory ?? "NERC CIP";
+  const resourceText = resource.title.includes("Glossary")
+    ? ["Access - Permission to use a system, facility, record, or capability.", "Approval - Documented authorization from a responsible owner.", "Evidence - Information retained to demonstrate an activity occurred.", "Traceability - The ability to connect a record to person, activity, timing, result, and process.", "Version - The specific course or procedure release associated with a record."]
+    : resource.title.includes("Reference")
+      ? [`Use this ${standard} reference to confirm the course's primary standard alignment. Exact requirement text and effective status are managed in the Standards workspace.`]
+      : [`Use this checklist while applying ${course?.shortTitle ?? course?.title ?? "this course"} concepts.`, "Identify the trigger or purpose.", "Confirm the responsible owner.", "Follow the approved organizational process.", "Retain date, scope, result, and supporting reference.", "Escalate uncertainty rather than filling gaps with assumptions."];
+  return (
+    <>
+      <PageHeader title={resource.title} subtitle={`${course?.title ?? "GridGuard Learning"} · Last updated ${new Date(resource.updatedAt).toLocaleDateString()}`} action={<button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => window.print()}>Print</button>} />
+      <Panel>
+        <p className="text-sm text-muted-foreground">{resource.description}</p>
+        <div className="mt-5 space-y-3">
+          {resourceText.map((line) => <div key={line} className="rounded-md border border-border bg-muted/30 p-3 text-sm">{line}</div>)}
+        </div>
+        {course ? <Link className="mt-5 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/courses/${course.id}`}>Back to Course</Link> : null}
+      </Panel>
+    </>
   );
 }
 
@@ -984,7 +1125,7 @@ function CompletionPanel({ course }: { course: Course }) {
   const state = getCourseCompletionState(data, user.id, course.id);
   const evidence = data.evidenceRecords.find((item) => item.userId === user.id && item.courseId === course.id);
   const cert = data.userCertifications.find((item) => item.userId === user.id && item.courseId === course.id);
-  return <div className="rounded-md border border-emerald-200 bg-emerald-50 p-5 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"><p className="text-xs font-semibold uppercase tracking-wide">Training Complete</p><h2 className="mt-1 text-2xl font-semibold">You completed CIP-004 Personnel Security & Training</h2><p className="mt-2 text-sm">Your completion record, assessment result, acknowledgement, and certificate have been saved.</p><div className="mt-4 grid gap-3 md:grid-cols-4"><Info label="Lessons" value="9 / 9 Complete" /><Info label="Required Activities" value="3 / 3 Complete" /><Info label="Assessment" value={`${state.score ?? evidence?.assessmentScore ?? 0}% Passed`} /><Info label="Acknowledgement" value="Submitted" /></div><div className="mt-4 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/certifications">View Certificate</Link><Link className="rounded-md border border-emerald-300 px-3 py-2 text-sm" to={`/records/${course.id}`}>View Training Record</Link><Link className="rounded-md border border-emerald-300 px-3 py-2 text-sm" to="/my-learning">Return to My Learning</Link></div>{cert ? <p className="mt-3 text-sm">Certificate: {cert.certificateId}</p> : null}<CourseFeedback courseId={course.id} /></div>;
+  return <div className="rounded-md border border-emerald-200 bg-emerald-50 p-5 text-emerald-950 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"><p className="text-xs font-semibold uppercase tracking-wide">Training Complete</p><h2 className="mt-1 text-2xl font-semibold">You completed {course.shortTitle ?? course.title}</h2><p className="mt-2 text-sm">Your completion record, assessment result, required activity state, and certificate data where applicable have been saved.</p><div className="mt-4 grid gap-3 md:grid-cols-4"><Info label="Required Items" value={`${state.completedItems.length} / ${state.requiredItems.length} Complete`} /><Info label="Required Activities" value={state.remainingItems.filter((item) => item.startsWith("block")).length ? "Pending" : "Complete"} /><Info label="Assessment" value={`${state.score ?? evidence?.assessmentScore ?? 0}% Passed`} /><Info label="Certificate" value={cert ? "Issued" : course.certificateEnabled ? "Pending" : "Not enabled"} /></div><div className="mt-4 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/certifications">View Certificate</Link><Link className="rounded-md border border-emerald-300 px-3 py-2 text-sm" to={`/records/${course.id}`}>View Training Record</Link><Link className="rounded-md border border-emerald-300 px-3 py-2 text-sm" to="/my-learning">Return to My Learning</Link></div>{cert ? <p className="mt-3 text-sm">Certificate: {cert.certificateId}</p> : null}<CourseFeedback courseId={course.id} /></div>;
 }
 
 function CourseFeedback({ courseId }: { courseId: string }) {
@@ -1008,7 +1149,7 @@ function TrainingRecord() {
   const enrollment = data.enrollments.find((item) => item.userId === user.id && item.courseId === course.id);
   const evidence = data.evidenceRecords.find((item) => item.userId === user.id && item.courseId === course.id);
   const cert = data.userCertifications.find((item) => item.userId === user.id && item.courseId === course.id);
-  return <><PageHeader title="Training Record" subtitle="Completed learner transcript detail." /><Panel><div className="grid gap-3 md:grid-cols-2"><Info label="Learner" value={user.name} /><Info label="Employee / learner identifier" value={user.id.slice(0, 12)} /><Info label="Course" value={course.title} /><Info label="Course version" value={version?.version ?? "1.0"} /><Info label="Standard" value="NERC CIP-004" /><Info label="Assignment date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Assigned"} /><Info label="Start date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Started"} /><Info label="Completion date" value={evidence?.completedAt ? new Date(evidence.completedAt).toLocaleDateString() : "Not complete"} /><Info label="Final assessment" value={`${evidence?.assessmentScore ?? "N/A"}%`} /><Info label="Passing score" value="80%" /><Info label="Attempts used" value={String(data.assessmentAttempts.filter((attempt) => attempt.userId === user.id && attempt.courseId === course.id).length || 1)} /><Info label="Scenario" value="Completed" /><Info label="Decision Exercise" value="Completed" /><Info label="Acknowledgement" value="Submitted" /><Info label="Certificate" value={cert?.certificateId ?? "Not issued"} /><Info label="Record status" value={evidence ? "Complete" : "In Progress"} /></div></Panel></>;
+  return <><PageHeader title="Training Record" subtitle="Completed learner transcript detail." /><Panel><div className="grid gap-3 md:grid-cols-2"><Info label="Learner" value={user.name} /><Info label="Employee / learner identifier" value={user.id.slice(0, 12)} /><Info label="Course" value={course.title} /><Info label="Course version" value={version?.version ?? "1.0"} /><Info label="Standard" value={course.subcategory ?? "NERC CIP"} /><Info label="Assignment date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Assigned"} /><Info label="Start date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Started"} /><Info label="Completion date" value={evidence?.completedAt ? new Date(evidence.completedAt).toLocaleDateString() : "Not complete"} /><Info label="Final assessment" value={`${evidence?.assessmentScore ?? "N/A"}%`} /><Info label="Passing score" value="80%" /><Info label="Attempts used" value={String(data.assessmentAttempts.filter((attempt) => attempt.userId === user.id && attempt.courseId === course.id).length || 1)} /><Info label="Required Activities" value={evidence ? "Completed" : "In progress"} /><Info label="Acknowledgement" value={data.acknowledgements.some((item) => item.userId === user.id && item.courseId === course.id) ? "Submitted" : course.requireAcknowledgement ? "Pending" : "Not required"} /><Info label="Certificate" value={cert?.certificateId ?? "Not issued"} /><Info label="Record status" value={evidence ? "Complete" : "In Progress"} /></div></Panel></>;
 }
 
 function QuestionBank() {

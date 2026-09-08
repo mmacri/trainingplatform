@@ -41,14 +41,14 @@ test("course manager creates a course and opens the lifecycle workspace", async 
   await page.getByLabel("Short Description").fill("Learn how high-quality NERC CIP training evidence supports repeatable compliance-readiness activities.");
   for (let index = 0; index < 5; index += 1) await page.getByRole("button", { name: "Continue" }).click();
   await page.getByRole("button", { name: "Create Course & Open Studio" }).click();
-  await expect(page.getByRole("heading", { name: /NERC CIP-004 Personnel Training Annual Refresher/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "NERC CIP Evidence Management Essentials" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Curriculum" })).toBeVisible();
 });
 
 test("curriculum builder edits persist after reload", async ({ page }) => {
   await login(page, "manager@gridguard.local");
   await page.getByRole("link", { name: /Course Management/ }).click();
-  await page.getByRole("link", { name: /NERC CIP-004 Personnel Training Annual Refresher/ }).click();
+  await page.getByRole("link", { name: /CIP-004 — Supervisor & Access Owner Workshop/ }).click();
   await page.getByRole("button", { name: "curriculum" }).click();
   page.once("dialog", async (dialog) => {
     expect(dialog.message()).toContain("Module name");
@@ -63,7 +63,7 @@ test("curriculum builder edits persist after reload", async ({ page }) => {
 test("reviewer requests changes and course manager resolves them", async ({ page }) => {
   await login(page, "manager@gridguard.local");
   await page.getByRole("link", { name: /Course Management/ }).click();
-  await page.getByRole("link", { name: /NERC CIP-005 Electronic Security Perimeter Access/ }).click();
+  await page.getByRole("link", { name: /CIP-005 — Electronic Security Perimeter Access/ }).click();
   await page.getByRole("button", { name: "review", exact: true }).click();
   await page.getByRole("button", { name: "Mark Resolved" }).first().click();
   await expect(page.getByText("Approved").first()).toBeVisible();
@@ -76,7 +76,7 @@ test("reviewer requests changes and course manager resolves them", async ({ page
 test("approved course publishes and can be assigned", async ({ page }) => {
   await login(page, "manager@gridguard.local");
   await page.getByRole("link", { name: /Course Management/ }).click();
-  await page.getByRole("link", { name: /NERC CIP Incident Response Fundamentals/ }).click();
+  await page.getByRole("link", { name: /CIP-008 — Incident Response Fundamentals/ }).click();
   await page.getByRole("button", { name: "Publish" }).click();
   page.once("dialog", (dialog) => dialog.accept());
   await page.getByRole("button", { name: "Publish Version 1.0" }).click();

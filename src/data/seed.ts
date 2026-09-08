@@ -1,6 +1,7 @@
 import { addDays, addMonths, subDays } from "date-fns";
 import type { AppData, Course, CourseStatus, QuestionType, Role } from "./schema";
 import { addFlagshipCip004Course } from "./flagshipCip004";
+import { addRebuiltCatalogCourses } from "./catalogCourseSeeds";
 
 const password = "GridGuard-Local-2026!";
 
@@ -143,7 +144,7 @@ export function createSeedData(): AppData {
     ["Priya Shah", "priya.shah@gridguard.local", "Compliance Analyst", "Compliance", ["LEARNER", "REVIEWER"]]
   ] as const;
 
-  for (const [name, email, jobTitle, teamName, roles] of users) {
+  for (const [index, [name, email, jobTitle, teamName, roles]] of users.entries()) {
     const [firstName, ...last] = name.split(" ");
     const user = record("user", {
       organizationId: organization.id,
@@ -155,7 +156,7 @@ export function createSeedData(): AppData {
       jobTitle,
       teamId: teamByName[teamName].id,
       status: "ACTIVE" as const,
-      lastActiveAt: iso(subDays(new Date(), Math.floor(Math.random() * 9)))
+      lastActiveAt: iso(subDays(new Date(), index % 9))
     });
     data.users.push(user);
     data.teamMembers.push(record("tm", { teamId: teamByName[teamName].id, userId: user.id }));
@@ -276,7 +277,7 @@ export function createSeedData(): AppData {
       version: "1.0",
       status: course.status,
       summary: input.description,
-      goal: `Prepare learners to apply ${input.standard} expectations in realistic work.`, 
+      goal: `${input.standard} learning objectives, course-specific practice, and completion evidence.`,
       publishedAt: course.status === "PUBLISHED" ? iso(subDays(new Date(), 12)) : undefined,
       immutable: course.status === "PUBLISHED",
       completionRules: ["LESSONS", "ASSESSMENT"].concat(input.certificate ? ["CERTIFICATE"] : [])
@@ -311,9 +312,9 @@ export function createSeedData(): AppData {
               ["key_takeaway", "Key Takeaway", "Training is valuable when the learner can perform the action and the organization can prove it later."]
             ]
           : [
-              ["heading", lessonTitle, `Core concept for ${input.standard}.`],
-              ["compliance_note", "Compliance Note", "Connect the learner action to documented evidence and accountable ownership."],
-              ["example", "Example", "A complete record includes the learner, training version, date, result, and mapped requirement."]
+              ["heading", lessonTitle, `${lessonTitle} introduces a focused NERC CIP learning activity.`],
+              ["compliance_note", "Compliance Note", "Use the approved organizational process and retain records that explain the action taken."],
+              ["example", "Example", "A useful record identifies the activity, owner, timing, outcome, and supporting reference."]
             ];
         baseBlocks.forEach(([type, title, body], blockIndex) =>
           data.contentBlocks.push(record("block", { lessonId: lesson.id, type, title, body, position: blockIndex + 1 }))
@@ -388,149 +389,63 @@ export function createSeedData(): AppData {
   courseMap.set(cip004.title, cip004);
   courseMap.set("CIP-004 — Personnel & Training", cip004);
 
-  const morganDraft = addCourse({
-    title: "NERC CIP-004 Personnel Training Annual Refresher",
-    description: "Annual refresher covering personnel risk, access lifecycle duties, training records, and repeatable CIP-004 evidence expectations.",
-    standard: "CIP-004",
-    accessMode: "RESTRICTED",
-    status: "DRAFT",
-    duration: 60,
+  const rebuiltCatalog = addRebuiltCatalogCourses(data, {
+    organizationId: organization.id,
     ownerId: manager.id,
-    grants: [
-      { type: "TEAM", name: "Operations" },
-      { type: "GROUP", name: "CIP Compliance" }
-    ],
-    modules: [
-      { title: "Personnel Risk Context", lessons: ["Annual personnel risk expectations", "Role changes and training triggers"] },
-      { title: "Access Lifecycle", lessons: ["Authorization before access", "Revocation and transfer evidence"] },
-      { title: "Training Records", lessons: ["Evidence package essentials"] },
-      { title: "Final Assessment", lessons: ["Refresher assessment preparation"] }
-    ]
+    reviewerId: compliance.id,
+    standardVersionByNumber: getStandardVersion,
+    teams: teamByName,
+    groups: groupByName
+  });
+  Object.values(rebuiltCatalog).forEach((course) => {
+    courseMap.set(course.title, course);
+    if (course.title.startsWith("CIP-")) courseMap.set(course.title.replace("CIP-", "NERC CIP-"), course);
+  });
+  const morganDraft = rebuiltCatalog["course-cip004-supervisor-workshop"];
+  const awareness = rebuiltCatalog["course-annual-awareness"];
+  const cip007 = rebuiltCatalog["course-cip007-system-security"];
+  const cip005Review = rebuiltCatalog["course-cip005-esp-access"];
+  const incidentApproved = rebuiltCatalog["course-cip008-incident-response"];
+  cip005Review.status = "CHANGES_REQUESTED";
+  data.courseVersions.filter((version) => version.courseId === cip005Review.id).forEach((version) => {
+    version.status = "CHANGES_REQUESTED";
+    version.immutable = false;
+  });
+  incidentApproved.status = "APPROVED";
+  data.courseVersions.filter((version) => version.courseId === incidentApproved.id).forEach((version) => {
+    version.status = "APPROVED";
+    version.immutable = false;
+    version.publishedAt = undefined;
   });
 
-  const awareness = addCourse({
-    title: "Annual NERC CIP Cybersecurity Awareness",
-    description: "Annual cybersecurity awareness for grid operations personnel and supporting teams.",
-    standard: "CIP-004",
-    accessMode: "OPEN",
-    duration: 75,
-    flagship: true,
-    certificate: "Annual NERC CIP Awareness Certificate",
-    modules: [
-      { title: "Security Fundamentals", lessons: ["Why Grid Cybersecurity Matters", "User Responsibilities", "Authentication", "Phishing"] },
-      { title: "Operational Controls", lessons: ["Physical Security", "Information Handling", "Removable Media", "Remote Access"] },
-      { title: "Response & Assurance", lessons: ["Incident Reporting", "Third Party Risk", "Assessment", "Acknowledgement"] }
-    ]
-  });
-
-  const cip007 = addCourse({
-    title: "NERC CIP-007 System Security Management",
-    description: "Security patch, malicious code prevention, account management, and vulnerability management training.",
-    standard: "CIP-007",
-    accessMode: "RESTRICTED",
-    ownerId: manager.id,
-    duration: 50,
-    grants: [
-      { type: "TEAM", name: "Cybersecurity" },
-      { type: "GROUP", name: "Privileged Access Users" }
-    ],
-    modules: [
-      { title: "System Security Controls", lessons: ["Patch Governance", "Malicious Code Prevention", "Account Review"] },
-      { title: "Vulnerability Management", lessons: ["Assessment Cadence", "Evidence Collection"] }
-    ]
-  });
-
-  const cip005Review = addCourse({
-    title: "NERC CIP-005 Electronic Security Perimeter Access",
-    description: "Course for electronic security perimeter access authorization, monitoring expectations, and access evidence review.",
-    standard: "CIP-005",
-    accessMode: "RESTRICTED",
-    status: "CHANGES_REQUESTED",
-    ownerId: manager.id,
-    duration: 55,
-    grants: [
-      { type: "TEAM", name: "Operations" },
-      { type: "GROUP", name: "CIP Compliance" }
-    ],
-    modules: [
-      { title: "ESP Access Context", lessons: ["ESP access authorization", "Interactive remote access considerations"] },
-      { title: "Evidence and Review", lessons: ["Access review evidence", "Exception handling"] },
-      { title: "Scenario", lessons: ["Access request decision scenario"] }
-    ]
-  });
-
-  const incidentApproved = addCourse({
-    title: "NERC CIP Incident Response Fundamentals",
-    description: "Response-team fundamentals for recognizing, escalating, documenting, and learning from cybersecurity incidents.",
-    standard: "CIP-008",
-    accessMode: "RESTRICTED",
-    status: "APPROVED",
-    ownerId: manager.id,
-    duration: 45,
-    grants: [
-      { type: "GROUP", name: "Incident Response Team" },
-      { type: "GROUP", name: "CIP Compliance" }
-    ],
-    modules: [
-      { title: "Incident Response Context", lessons: ["Recognizing reportable events", "Escalation roles"] },
-      { title: "Response Evidence", lessons: ["Incident documentation", "Lessons learned"] },
-      { title: "Final Assessment", lessons: ["Response readiness assessment"] }
-    ]
-  });
-
-  addCourse({
-    title: "Audit Preparation Workshop",
-    description: "Prepare evidence packages, resolve gaps, and present repeatable compliance narratives.",
-    standard: "CIP-003",
-    accessMode: "RESTRICTED",
-    duration: 45,
-    grants: [{ type: "GROUP", name: "CIP Compliance" }],
-    modules: [{ title: "Audit Readiness", lessons: ["Evidence Package Review", "Gap Remediation", "Auditor Walkthrough"] }]
-  });
-
-  addCourse({
-    title: "Internal Draft Procedure Training",
-    description: "Private draft procedure course visible only to owners and administrators.",
-    standard: "CIP-010",
-    accessMode: "PRIVATE",
-    status: "DRAFT",
-    duration: 30,
-    showInCatalog: false,
-    modules: [{ title: "Draft Procedure", lessons: ["Draft Handling Expectations"] }]
-  });
-
-  for (const number of Object.keys(cipTitles)) {
-    if (["CIP-004", "CIP-005", "CIP-007", "CIP-008"].includes(number)) continue;
-    addCourse({
-      title: `${number} — ${cipTitles[number]}`,
-      description: `Foundational course for ${number}: ${cipTitles[number]}.`,
-      standard: number,
-      accessMode: "OPEN",
-      duration: 35,
-      modules: [
-        { title: `${number} Overview`, lessons: ["Requirement Context", "Control Responsibilities"] },
-        { title: "Evidence", lessons: ["Evidence Expectations", "Readiness Review"] }
-      ]
-    });
-  }
-
-  const learningPathNames = [
-    "NERC CIP Foundations",
-    "BES Cyber System Privileged Access Qualification",
-    "NERC CIP Incident Response Team Qualification",
-    "NERC CIP Compliance & Audit Readiness",
-    "Annual Cybersecurity Awareness"
+  const learningPathDefinitions = [
+    {
+      title: "NERC CIP Foundations",
+      courses: [awareness, rebuiltCatalog["course-cip004-foundations"], cip004]
+    },
+    {
+      title: "Privileged Technical User",
+      courses: [awareness, rebuiltCatalog["course-cip004-foundations"], rebuiltCatalog["course-cip005-esp-access"], cip007, rebuiltCatalog["course-cip010-change-vulnerability"], rebuiltCatalog["course-cip011-information-protection"]]
+    },
+    {
+      title: "Cybersecurity Operations",
+      courses: [rebuiltCatalog["course-cip005-esp-access"], cip007, incidentApproved, rebuiltCatalog["course-cip010-change-vulnerability"], rebuiltCatalog["course-cip015-insm"]]
+    },
+    {
+      title: "Compliance & Control Owner Readiness",
+      courses: [rebuiltCatalog["course-cip002-categorization"], rebuiltCatalog["course-cip003-security-management"], morganDraft, rebuiltCatalog["course-audit-preparation"]]
+    }
   ];
-  learningPathNames.forEach((title, index) => {
+  learningPathDefinitions.forEach(({ title, courses }, index) => {
     const path = record("path", {
       organizationId: organization.id,
       title,
       description: `${title} learning sequence with tracked completion and evidence.`,
       slug: slugify(title),
-      sequential: index !== 4
+      sequential: true
     });
     data.learningPaths.push(path);
-    [awareness, cip004].forEach((course, position) => data.learningPathCourses.push(record("pathcourse", { learningPathId: path.id, courseId: course.id, required: true, position: position + 1 })));
+    courses.forEach((course, position) => data.learningPathCourses.push(record("pathcourse", { learningPathId: path.id, courseId: course.id, required: true, position: position + 1 })));
     data.learningPathEnrollments.push(record("pathenroll", { learningPathId: path.id, userId: learner.id, progress: index === 0 ? 45 : 0, status: index === 0 ? "IN_PROGRESS" : "NOT_STARTED" }));
   });
 
@@ -592,7 +507,7 @@ export function createSeedData(): AppData {
   data.assignmentAudiences.push(record("aud", { assignmentId: overdueAssignment.id, audienceType: "USER" as const, audienceId: learner.id }));
   data.enrollments.push(record("enroll", { organizationId: organization.id, userId: learner.id, courseId: overdue.id, assignmentId: overdueAssignment.id, status: "OVERDUE" as const }));
 
-  const reviewCourse = courseMap.get("Audit Preparation Workshop")!;
+  const reviewCourse = courseMap.get("NERC CIP Audit Preparation Workshop")!;
   const review = record("review", { courseVersionId: reviewCourse.currentVersionId!, status: "OPEN" as const, dueAt: iso(addDays(new Date(), 6)) });
   data.reviews.push(review);
   data.reviewAssignments.push(record("reviewassign", { reviewId: review.id, userId: compliance.id }));
@@ -635,7 +550,7 @@ export function createSeedData(): AppData {
       newVersion: "Future Enforcement",
       effectiveDate: iso(addMonths(new Date(), 6)),
       summary: "Evaluate internal network monitoring course impacts.",
-      affectedCourseIds: [courseMap.get("CIP-015 — Internal Network Security Monitoring")!.id],
+      affectedCourseIds: [rebuiltCatalog["course-cip015-insm"].id],
       ownerId: compliance.id,
       dueAt: iso(addDays(new Date(), 30)),
       status: "IMPACT_REVIEW" as const
@@ -652,11 +567,13 @@ export function createSeedData(): AppData {
     record("setting", { key: "initialized", value: true }),
     record("setting", { key: "theme", value: "system" }),
     record("setting", { key: "sessionTimeoutHours", value: 8 }),
+    record("setting", { key: "catalogContentVersion", value: 3 }),
     record("setting", { key: "version", value: "0.1.0" })
   );
 
   data.auditEvents.push(
     record("audit", { organizationId: organization.id, actorId: admin.id, action: "DATA_RESTORED", objectType: "Application", objectId: organization.id, summary: "Demo learning environment initialized." }),
+    record("audit", { organizationId: organization.id, actorId: admin.id, action: "DATA_RESTORED", objectType: "Application", objectId: organization.id, summary: "Demo catalog upgraded to complete curriculum version 3." }),
     record("audit", { organizationId: organization.id, actorId: author.id, action: "COURSE_PUBLISHED", objectType: "Course", objectId: cip004.id, summary: "Published CIP-004 flagship course." }),
     record("audit", { organizationId: organization.id, actorId: admin.id, action: "ASSIGNMENT_CREATED", objectType: "Assignment", objectId: assignment.id, summary: "Assigned CIP-004 to Taylor Morgan." })
   );
@@ -686,6 +603,7 @@ function completeCourseForSeed(data: AppData, organizationId: string, userId: st
   const version = data.courseVersions.find((item) => item.id === course.currentVersionId)!;
   const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === version.id);
   const completedAt = iso(subDays(new Date(), 18));
+  const user = data.users.find((item) => item.id === userId)!;
   data.enrollments.push(record("enroll", { organizationId, userId, courseId, status: "COMPLETED" as const, startedAt: iso(subDays(new Date(), 22)), lastAccessedAt: completedAt, completedAt }));
   data.courseProgress.push(record("progress", { userId, courseId, courseVersionId: version.id, status: "COMPLETED" as const, percentComplete: 100, completedAt }));
   lessons.forEach((lesson) => data.lessonProgress.push(record("lessonprogress", { userId, lessonId: lesson.id, completedAt })));
@@ -694,10 +612,9 @@ function completeCourseForSeed(data: AppData, organizationId: string, userId: st
   let certificateId: string | undefined;
   const requirement = data.certificationRequirements.find((item) => item.type === "COURSE" && item.targetId === courseId);
   if (requirement) {
-    certificateId = `GG-${new Date().getFullYear()}-${Math.floor(Math.random() * 90000 + 10000)}`;
+    certificateId = `GG-${new Date().getFullYear()}-${course.id.replace(/^course-/, "").slice(0, 12).toUpperCase()}-${user.name.split(" ").map((part) => part[0]).join("").toUpperCase()}-${score}`;
     data.userCertifications.push(record("usercert", { userId, certificationId: requirement.certificationId, courseId, certificateId, issuedAt: completedAt, expiresAt: iso(addDays(new Date(completedAt), 365)), status: "ACTIVE" as const }));
   }
-  const user = data.users.find((item) => item.id === userId)!;
   data.evidenceRecords.push(
     record("evidence", {
       organizationId,

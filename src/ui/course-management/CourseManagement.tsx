@@ -558,7 +558,7 @@ export function CourseCreationWizard() {
   const [draftId, setDraftId] = useState<string | undefined>();
   const defaultStandard = data.standardVersions.find((version) => data.standards.find((standard) => standard.id === version.standardId)?.number === "CIP-004");
   const [form, setForm] = useState<WizardState>({
-    title: "NERC CIP-004 Personnel Training Annual Refresher",
+    title: "NERC CIP Evidence Management Essentials",
     description: "",
     category: "NERC CIP",
     difficulty: "Foundational",
