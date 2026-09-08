@@ -1,4 +1,4 @@
-import { copyFile, cp, mkdir, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 
@@ -10,7 +10,7 @@ if (!existsSync(dist)) {
 }
 
 for (const entry of ["assets", "icons"]) {
-  await rm(join(root, entry), { recursive: true, force: true });
+  await mkdir(join(root, entry), { recursive: true });
   await cp(join(dist, entry), join(root, entry), { recursive: true });
 }
 
