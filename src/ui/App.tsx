@@ -25,7 +25,7 @@ import {
   UsersRound,
   X
 } from "lucide-react";
-import { createContext, type FormEvent, useContext, useEffect, useMemo, useState } from "react";
+import { type FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { addDays, formatDistanceToNow } from "date-fns";
@@ -36,7 +36,9 @@ import {
   AuthService,
   WorkflowService,
   canAccessCourse,
+  canCreateCourses,
   canEditCourse,
+  canManageCourses,
   canManageUsers,
   canPublishCourse,
   canViewCompliance,
@@ -46,29 +48,10 @@ import {
   hasAnyRole,
   searchAuthorized
 } from "../services/appServices";
+import { AppContext, type Toast, useApp } from "./appContext";
+import { AssignmentWizard, CourseCreationWizard, CourseManagementDashboard, CourseWorkspace } from "./course-management/CourseManagement";
 
 const demoPassword = "GridGuard-Local-2026!";
-
-type Toast = { id: string; message: string };
-type AppContextValue = {
-  data: AppData;
-  setData: (data: AppData) => void;
-  user: User;
-  roles: Role[];
-  refresh: () => Promise<void>;
-  service: () => WorkflowService;
-  toast: (message: string) => void;
-  theme: string;
-  setTheme: (theme: string) => void;
-};
-
-const AppContext = createContext<AppContextValue | undefined>(undefined);
-
-function useApp() {
-  const value = useContext(AppContext);
-  if (!value) throw new Error("AppContext missing");
-  return value;
-}
 
 export function App() {
   const [data, setData] = useState<AppData | null>(null);
@@ -295,7 +278,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
         <button className="ml-auto hidden h-10 min-w-72 items-center gap-2 rounded-md border border-border px-3 text-left text-sm text-muted-foreground md:flex" onClick={() => setSearchOpen(true)}>
           <Search size={17} /> Search courses, standards, evidence
         </button>
-        {hasAnyRole(data, user.id, ["AUTHOR", "LEARNING_ADMIN", "PLATFORM_ADMIN"]) ? <QuickCreate /> : null}
+        {canCreateCourses(data, user.id) ? <QuickCreate /> : null}
         <button className="relative rounded-md border border-border p-2" aria-label="Notifications" onClick={() => toast(`${unread} unread notifications`)}>
           <Bell size={18} />
           {unread ? <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-[10px] text-white">{unread}</span> : null}
@@ -346,9 +329,11 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/skills" element={<SkillsPage />} />
             <Route path="/courses/:courseId" element={<CourseLanding />} />
             <Route path="/learn/:courseId/:lessonId?" element={<CoursePlayer onNotes={() => setNotesOpen(true)} />} />
-            <Route path="/build" element={<Guard allow={hasAnyRole(data, user.id, ["AUTHOR", "PLATFORM_ADMIN"])} label="Course Studio"><CourseStudio /></Guard>} />
-            <Route path="/build/questions" element={<Guard allow={hasAnyRole(data, user.id, ["AUTHOR", "PLATFORM_ADMIN"])} label="Question Bank"><QuestionBank /></Guard>} />
-            <Route path="/build/courses/:courseId" element={<CourseEditor />} />
+            <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
+            <Route path="/build/new" element={<Guard allow={canCreateCourses(data, user.id)} label="Create Course"><CourseCreationWizard /></Guard>} />
+            <Route path="/build/questions" element={<Guard allow={canManageCourses(data, user.id)} label="Question Bank"><QuestionBank /></Guard>} />
+            <Route path="/build/courses/:courseId" element={<CourseWorkspace />} />
+            <Route path="/build/courses/:courseId/assign" element={<Guard allow={canManageCourses(data, user.id)} label="Assign Training"><AssignmentWizard /></Guard>} />
             <Route path="/team" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Team Learning"><TeamDashboard /></Guard>} />
             <Route path="/compliance" element={<Guard allow={canViewCompliance(data, user.id)} label="Compliance"><ComplianceDashboard /></Guard>} />
             <Route path="/standards" element={<Guard allow={canViewCompliance(data, user.id) || roles.includes("LEARNER")} label="Standards"><StandardsPage /></Guard>} />
@@ -377,16 +362,13 @@ function buildNav(data: AppData, userId: string) {
   const items = [
     { label: "Home", href: "/home", icon: Home },
     { label: "My Learning", href: "/my-learning", icon: GraduationCap },
-    { label: "Library", href: "/library", icon: Library },
+    { label: "Catalog", href: "/library", icon: Library },
     { label: "Learning Paths", href: "/learning-paths", icon: BookOpenCheck },
     { label: "Certifications", href: "/certifications", icon: FileCheck2 },
     { label: "Skills", href: "/skills", icon: CheckCircle2 }
   ];
   if (hasAnyRole(data, userId, ["MANAGER", "PLATFORM_ADMIN"])) items.push({ label: "Team Learning", href: "/team", icon: UsersRound });
-  if (hasAnyRole(data, userId, ["AUTHOR", "REVIEWER", "PLATFORM_ADMIN"])) {
-    items.push({ label: "Course Studio", href: "/build", icon: ClipboardCheck });
-    items.push({ label: "Question Bank", href: "/build/questions", icon: KeyRound });
-  }
+  if (canManageCourses(data, userId)) items.push({ label: "Course Management", href: "/build", icon: ClipboardCheck });
   if (canViewCompliance(data, userId)) {
     items.push({ label: "Compliance", href: "/compliance", icon: ShieldCheck });
     items.push({ label: "Standards", href: "/standards", icon: Library });
@@ -993,9 +975,18 @@ function DataManagement() {
 }
 
 function QuickCreate() {
+  const { data, user } = useApp();
   const [open, setOpen] = useState(false);
   const navigate = useNavigate();
-  return <div className="relative"><button className="rounded-md bg-cyan-700 p-2 text-white" aria-label="Quick create" onClick={() => setOpen(!open)}><Plus size={18}/></button>{open ? <div className="absolute right-0 top-11 z-50 w-52 rounded-md border border-border bg-white p-2 shadow-soft dark:bg-slate-950">{["New Course", "New Learning Path", "New Assessment", "New Assignment", "New Certification", "New User"].map((item) => <button key={item} className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOpen(false); navigate(item === "New User" ? "/admin/users" : item === "New Assignment" ? "/admin/assignments" : "/build"); }}>{item}</button>)}</div> : null}</div>;
+  const actions = [
+    { label: "New Course", href: "/build/new", show: canCreateCourses(data, user.id) },
+    { label: "New Learning Path", href: "/learning-paths", show: canCreateCourses(data, user.id) },
+    { label: "New Assessment", href: "/build/questions", show: canManageCourses(data, user.id) },
+    { label: "New Assignment", href: "/admin/assignments", show: canManageUsers(data, user.id) },
+    { label: "New Certification", href: "/admin", show: canManageUsers(data, user.id) },
+    { label: "New User", href: "/admin/users", show: canManageUsers(data, user.id) }
+  ].filter((action) => action.show);
+  return <div className="relative"><button className="rounded-md bg-cyan-700 p-2 text-white" aria-label="Quick create" onClick={() => setOpen(!open)}><Plus size={18}/></button>{open ? <div className="absolute right-0 top-11 z-50 w-52 rounded-md border border-border bg-white p-2 shadow-soft dark:bg-slate-950">{actions.map((item) => <button key={item.label} className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOpen(false); navigate(item.href); }}>{item.label}</button>)}</div> : null}</div>;
 }
 
 function DemoSwitcher({ onClose, onSwitch, onLogout }: { onClose: () => void; onSwitch: (userId: string) => void; onLogout: () => void }) {

@@ -131,7 +131,7 @@ export function createSeedData(): AppData {
 
   const users = [
     ["Taylor Morgan", "learner@gridguard.local", "Operations Specialist", "Operations", ["LEARNER"]],
-    ["Morgan Chen", "manager@gridguard.local", "Operations Training Manager", "Operations", ["LEARNER", "MANAGER"]],
+    ["Morgan Chen", "manager@gridguard.local", "Operations Training Manager", "Operations", ["LEARNER", "MANAGER", "AUTHOR", "COURSE_OWNER"]],
     ["Riley Patel", "author@gridguard.local", "Course Author", "Cybersecurity", ["LEARNER", "AUTHOR", "COURSE_OWNER"]],
     ["Casey Nguyen", "compliance@gridguard.local", "Compliance Manager", "Compliance", ["LEARNER", "REVIEWER", "COMPLIANCE_MANAGER"]],
     ["Avery Brooks", "admin@gridguard.local", "Learning Administrator", "IT Infrastructure", ["LEARNER", "AUTHOR", "REVIEWER", "COMPLIANCE_MANAGER", "LEARNING_ADMIN", "PLATFORM_ADMIN"]],
@@ -165,13 +165,14 @@ export function createSeedData(): AppData {
   teamByName.Compliance.managerId = data.users.find((user) => user.email === "compliance@gridguard.local")?.id;
 
   const learner = data.users.find((user) => user.email === "learner@gridguard.local")!;
+  const manager = data.users.find((user) => user.email === "manager@gridguard.local")!;
   const author = data.users.find((user) => user.email === "author@gridguard.local")!;
   const compliance = data.users.find((user) => user.email === "compliance@gridguard.local")!;
   const admin = data.users.find((user) => user.email === "admin@gridguard.local")!;
   const priya = data.users.find((user) => user.email === "priya.shah@gridguard.local")!;
   const jamie = data.users.find((user) => user.email === "jamie.rivera@gridguard.local")!;
 
-  for (const user of [learner, compliance, priya]) {
+  for (const user of [learner, manager, compliance, priya]) {
     data.groupMembers.push(record("gm", { groupId: groupByName["CIP Compliance"].id, userId: user.id }));
   }
   for (const user of [jamie, admin]) data.groupMembers.push(record("gm", { groupId: groupByName["Privileged Access Users"].id, userId: user.id }));
@@ -228,6 +229,7 @@ export function createSeedData(): AppData {
     allowSelfEnrollment?: boolean;
     allowAccessRequests?: boolean;
     grants?: Array<{ type: "USER" | "TEAM" | "GROUP" | "ROLE"; name: string }>;
+    ownerId?: string;
     modules: Array<{ title: string; lessons: string[] }>;
     flagship?: boolean;
     certificate?: string;
@@ -247,13 +249,13 @@ export function createSeedData(): AppData {
       allowAccessRequests: input.allowAccessRequests ?? input.accessMode === "RESTRICTED",
       requireManagerApproval: false,
       certificateEnabled: Boolean(input.certificate),
-      ownerId: author.id,
+      ownerId: input.ownerId ?? author.id,
       icon: "ShieldCheck",
       accent: "#0e7490"
     }) as Course;
     data.courses.push(course);
     courseMap.set(course.title, course);
-    data.courseOwners.push(record("owner", { courseId: course.id, userId: author.id }));
+    data.courseOwners.push(record("owner", { courseId: course.id, userId: input.ownerId ?? author.id }));
     data.courseContributors.push(record("contrib", { courseId: course.id, userId: compliance.id, role: "REVIEWER" as Role }));
     data.courseAccessPolicies.push(record("policy", { courseId: course.id, mode: course.accessMode }));
     for (const grant of input.grants ?? []) {
@@ -394,6 +396,26 @@ export function createSeedData(): AppData {
     ]
   });
 
+  const morganDraft = addCourse({
+    title: "NERC CIP-004 Personnel Training Annual Refresher",
+    description: "Annual refresher covering personnel risk, access lifecycle duties, training records, and repeatable CIP-004 evidence expectations.",
+    standard: "CIP-004",
+    accessMode: "RESTRICTED",
+    status: "DRAFT",
+    duration: 60,
+    ownerId: manager.id,
+    grants: [
+      { type: "TEAM", name: "Operations" },
+      { type: "GROUP", name: "CIP Compliance" }
+    ],
+    modules: [
+      { title: "Personnel Risk Context", lessons: ["Annual personnel risk expectations", "Role changes and training triggers"] },
+      { title: "Access Lifecycle", lessons: ["Authorization before access", "Revocation and transfer evidence"] },
+      { title: "Training Records", lessons: ["Evidence package essentials"] },
+      { title: "Final Assessment", lessons: ["Refresher assessment preparation"] }
+    ]
+  });
+
   const awareness = addCourse({
     title: "Annual NERC CIP Cybersecurity Awareness",
     description: "Annual cybersecurity awareness for grid operations personnel and supporting teams.",
@@ -409,11 +431,12 @@ export function createSeedData(): AppData {
     ]
   });
 
-  addCourse({
-    title: "CIP-007 — System Security Management",
+  const cip007 = addCourse({
+    title: "NERC CIP-007 System Security Management",
     description: "Security patch, malicious code prevention, account management, and vulnerability management training.",
     standard: "CIP-007",
     accessMode: "RESTRICTED",
+    ownerId: manager.id,
     duration: 50,
     grants: [
       { type: "TEAM", name: "Cybersecurity" },
@@ -422,6 +445,44 @@ export function createSeedData(): AppData {
     modules: [
       { title: "System Security Controls", lessons: ["Patch Governance", "Malicious Code Prevention", "Account Review"] },
       { title: "Vulnerability Management", lessons: ["Assessment Cadence", "Evidence Collection"] }
+    ]
+  });
+
+  const cip005Review = addCourse({
+    title: "NERC CIP-005 Electronic Security Perimeter Access",
+    description: "Course for electronic security perimeter access authorization, monitoring expectations, and access evidence review.",
+    standard: "CIP-005",
+    accessMode: "RESTRICTED",
+    status: "CHANGES_REQUESTED",
+    ownerId: manager.id,
+    duration: 55,
+    grants: [
+      { type: "TEAM", name: "Operations" },
+      { type: "GROUP", name: "CIP Compliance" }
+    ],
+    modules: [
+      { title: "ESP Access Context", lessons: ["ESP access authorization", "Interactive remote access considerations"] },
+      { title: "Evidence and Review", lessons: ["Access review evidence", "Exception handling"] },
+      { title: "Scenario", lessons: ["Access request decision scenario"] }
+    ]
+  });
+
+  const incidentApproved = addCourse({
+    title: "NERC CIP Incident Response Fundamentals",
+    description: "Response-team fundamentals for recognizing, escalating, documenting, and learning from cybersecurity incidents.",
+    standard: "CIP-008",
+    accessMode: "RESTRICTED",
+    status: "APPROVED",
+    ownerId: manager.id,
+    duration: 45,
+    grants: [
+      { type: "GROUP", name: "Incident Response Team" },
+      { type: "GROUP", name: "CIP Compliance" }
+    ],
+    modules: [
+      { title: "Incident Response Context", lessons: ["Recognizing reportable events", "Escalation roles"] },
+      { title: "Response Evidence", lessons: ["Incident documentation", "Lessons learned"] },
+      { title: "Final Assessment", lessons: ["Response readiness assessment"] }
     ]
   });
 
@@ -447,7 +508,7 @@ export function createSeedData(): AppData {
   });
 
   for (const number of Object.keys(cipTitles)) {
-    if (number === "CIP-004" || number === "CIP-007") continue;
+    if (["CIP-004", "CIP-005", "CIP-007", "CIP-008"].includes(number)) continue;
     addCourse({
       title: `${number} — ${cipTitles[number]}`,
       description: `Foundational course for ${number}: ${cipTitles[number]}.`,
@@ -495,6 +556,25 @@ export function createSeedData(): AppData {
   data.assignmentAudiences.push(record("aud", { assignmentId: assignment.id, audienceType: "USER" as const, audienceId: learner.id }));
   data.enrollments.push(record("enroll", { organizationId: organization.id, userId: learner.id, courseId: cip004.id, assignmentId: assignment.id, status: "IN_PROGRESS" as const, startedAt: iso(subDays(new Date(), 2)), lastAccessedAt: iso(), currentLessonId: data.lessons.find((l) => l.courseVersionId === cip004.currentVersionId)!.id }));
 
+  const cip007Assignment = record("assign", {
+    organizationId: organization.id,
+    title: "Required CIP-007 System Security Management",
+    targetType: "COURSE" as const,
+    targetId: cip007.id,
+    createdById: manager.id,
+    dueAt: iso(addDays(new Date(), 21)),
+    assignedAt: iso(subDays(new Date(), 12)),
+    recurrence: "ANNUAL" as const,
+    notificationSettings: { notifyLearners: true, reminder7: true, reminder3: true, dueDate: true, managerOverdue: true },
+    status: "ACTIVE" as const
+  });
+  data.assignments.push(cip007Assignment);
+  data.assignmentAudiences.push(record("aud", { assignmentId: cip007Assignment.id, audienceType: "TEAM" as const, audienceId: teamByName.Operations.id }));
+  const alex = data.users.find((user) => user.email === "alex.harper@gridguard.local")!;
+  data.enrollments.push(record("enroll", { organizationId: organization.id, userId: alex.id, courseId: cip007.id, assignmentId: cip007Assignment.id, status: "IN_PROGRESS" as const, startedAt: iso(subDays(new Date(), 5)), lastAccessedAt: iso(subDays(new Date(), 1)), currentLessonId: data.lessons.find((lesson) => lesson.courseVersionId === cip007.currentVersionId)!.id }));
+  data.courseProgress.push(record("progress", { userId: alex.id, courseId: cip007.id, courseVersionId: cip007.currentVersionId!, status: "IN_PROGRESS" as const, percentComplete: 45 }));
+  completeCourseForSeed(data, organization.id, learner.id, cip007.id, 88);
+
   for (const completeCourse of [awareness, courseMap.get("CIP-002 — BES Cyber System Categorization")!]) {
     completeCourseForSeed(data, organization.id, learner.id, completeCourse.id, 92);
   }
@@ -519,6 +599,35 @@ export function createSeedData(): AppData {
   data.reviews.push(review);
   data.reviewAssignments.push(record("reviewassign", { reviewId: review.id, userId: compliance.id }));
   data.reviewComments.push(record("comment", { reviewId: review.id, authorId: compliance.id, body: "Add a stronger evidence retention example before publication.", blocking: true, status: "OPEN" as const, replies: [] }));
+
+  const cip005ReviewRecord = record("review", {
+    courseVersionId: cip005Review.currentVersionId!,
+    status: "CHANGES_REQUESTED" as const,
+    dueAt: iso(addDays(new Date(), 3)),
+    submittedAt: iso(subDays(new Date(), 4)),
+    message: "Please confirm this access course is ready for quarterly rollout.",
+    requireAllReviewers: false
+  });
+  data.reviews.push(cip005ReviewRecord);
+  data.reviewAssignments.push(record("reviewassign", { reviewId: cip005ReviewRecord.id, userId: compliance.id }));
+  data.reviewAssignments.push(record("reviewassign", { reviewId: cip005ReviewRecord.id, userId: priya.id }));
+  data.reviewComments.push(
+    record("comment", { reviewId: cip005ReviewRecord.id, authorId: compliance.id, body: "Clarify the first action when access responsibilities change mid-cycle.", location: "Lesson: ESP access authorization", severity: "BLOCKING" as const, blocking: true, status: "OPEN" as const, replies: [] }),
+    record("comment", { reviewId: cip005ReviewRecord.id, authorId: priya.id, body: "Add an evidence example showing requester, approver, date, and access scope.", location: "Compliance mapping", severity: "REQUIRED_CHANGE" as const, blocking: false, status: "OPEN" as const, replies: [] })
+  );
+  data.approvals.push(record("approval", { reviewId: cip005ReviewRecord.id, approverId: compliance.id, decision: "CHANGES_REQUESTED" as const, comment: "Resolve comments before publication." }));
+
+  const incidentReview = record("review", {
+    courseVersionId: incidentApproved.currentVersionId!,
+    status: "APPROVED" as const,
+    dueAt: iso(addDays(new Date(), 2)),
+    submittedAt: iso(subDays(new Date(), 2)),
+    message: "Ready for incident response rollout.",
+    requireAllReviewers: false
+  });
+  data.reviews.push(incidentReview);
+  data.reviewAssignments.push(record("reviewassign", { reviewId: incidentReview.id, userId: compliance.id }));
+  data.approvals.push(record("approval", { reviewId: incidentReview.id, approverId: compliance.id, decision: "APPROVED" as const, comment: "Approved for publication." }));
 
   const changeStandard = data.standards.find((standard) => standard.number === "CIP-015")!;
   data.standardChangeReviews.push(

@@ -8,7 +8,7 @@ export type Role =
   | "LEARNING_ADMIN"
   | "PLATFORM_ADMIN";
 
-export type CourseStatus = "DRAFT" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "SCHEDULED" | "PUBLISHED" | "ARCHIVED";
+export type CourseStatus = "DRAFT" | "READY_FOR_REVIEW" | "IN_REVIEW" | "CHANGES_REQUESTED" | "APPROVED" | "SCHEDULED" | "PUBLISHED" | "ARCHIVED";
 export type AccessMode = "OPEN" | "RESTRICTED" | "ASSIGNMENT_ONLY" | "PRIVATE";
 export type TrainingStatus = "NOT_STARTED" | "IN_PROGRESS" | "COMPLETED" | "FAILED" | "OVERDUE" | "EXPIRED";
 export type EvidenceStatus = "CURRENT" | "INVALIDATED" | "REVIEW_SOON" | "NEEDS_REVIEW" | "EXPIRED";
@@ -92,6 +92,26 @@ export interface Course extends BaseRecord {
   ownerId: string;
   icon: string;
   accent: string;
+  coverVisual?: string;
+  completionEvidence?: string[];
+  completionDeadlineDays?: number;
+  requireAllLessons?: boolean;
+  requireFinalAssessment?: boolean;
+  requireScenarios?: boolean;
+  requireAcknowledgement?: boolean;
+  requireManagerValidation?: boolean;
+  finalAssessmentEnabled?: boolean;
+  attemptsAllowed?: number;
+  failedAttemptBehavior?: "RETRY_IMMEDIATELY" | "WAIT_24_HOURS" | "MANAGER_RESET_REQUIRED";
+  randomizeQuestions?: boolean;
+  randomizeAnswers?: boolean;
+  showAnswersAfterAttempt?: boolean;
+  certificateName?: string;
+  certificateExpirationMonths?: number;
+  scheduledPublishAt?: string;
+  publishedById?: string;
+  archiveReason?: string;
+  archivedAt?: string;
 }
 
 export interface CourseOwner extends BaseRecord {
@@ -123,6 +143,9 @@ export interface CourseVersion extends BaseRecord {
   summary: string;
   goal: string;
   publishedAt?: string;
+  publishedById?: string;
+  scheduledPublishAt?: string;
+  versionNotes?: string;
   immutable: boolean;
   completionRules: string[];
 }
@@ -218,6 +241,9 @@ export interface CourseStandardMapping extends BaseRecord {
   courseId: string;
   standardVersionId: string;
   objectiveId?: string;
+  requirementText?: string;
+  trainingRelevance?: string;
+  internalNotes?: string;
   evidenceExpectation: string;
 }
 
@@ -251,8 +277,10 @@ export interface Assignment extends BaseRecord {
   targetId: string;
   createdById: string;
   dueAt: string;
+  assignedAt?: string;
   recurrence: "NONE" | "ANNUAL" | "MONTHS";
   recurrenceMonths?: number;
+  notificationSettings?: Record<string, boolean>;
   status: "ACTIVE" | "COMPLETED" | "ARCHIVED";
 }
 
@@ -395,6 +423,9 @@ export interface Review extends BaseRecord {
   courseVersionId: string;
   status: "OPEN" | "APPROVED" | "CHANGES_REQUESTED";
   dueAt: string;
+  submittedAt?: string;
+  message?: string;
+  requireAllReviewers?: boolean;
 }
 
 export interface ReviewAssignment extends BaseRecord {
@@ -407,8 +438,12 @@ export interface ReviewComment extends BaseRecord {
   authorId: string;
   body: string;
   blockId?: string;
+  location?: string;
+  severity?: "SUGGESTION" | "REQUIRED_CHANGE" | "BLOCKING";
   blocking: boolean;
   status: ReviewStatus;
+  resolvedBy?: string;
+  resolvedAt?: string;
   replies: string[];
 }
 

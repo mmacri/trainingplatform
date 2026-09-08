@@ -5,7 +5,10 @@ import { createSeedData } from "../data/seed";
 import type {
   AccessRequest,
   AppData,
+  Assessment,
+  AssessmentQuestion,
   Assignment,
+  AssignmentAudience,
   AuditEvent,
   ContentBlock,
   Course,
@@ -13,11 +16,15 @@ import type {
   CourseStatus,
   CourseVersion,
   Enrollment,
+  LearningObjective,
   Lesson,
   Module,
   Notification,
   Question,
   QuestionOption,
+  QuestionType,
+  Review,
+  ReviewComment,
   Role,
   User
 } from "../data/schema";
@@ -50,6 +57,14 @@ export function canManageUsers(data: AppData, userId: string) {
   return hasAnyRole(data, userId, ["PLATFORM_ADMIN", "LEARNING_ADMIN"]);
 }
 
+export function canCreateCourses(data: AppData, userId: string) {
+  return hasAnyRole(data, userId, ["MANAGER", "AUTHOR", "COURSE_OWNER", "LEARNING_ADMIN", "PLATFORM_ADMIN"]);
+}
+
+export function canManageCourses(data: AppData, userId: string) {
+  return canCreateCourses(data, userId) || data.courseOwners.some((owner) => owner.userId === userId) || data.courseContributors.some((contributor) => contributor.userId === userId);
+}
+
 export function canViewCompliance(data: AppData, userId: string) {
   return hasAnyRole(data, userId, ["COMPLIANCE_MANAGER", "PLATFORM_ADMIN"]);
 }
@@ -65,7 +80,7 @@ export function canPublishCourse(data: AppData, userId: string, courseId: string
 export function canEditCourse(data: AppData, userId: string, courseId: string) {
   return (
     canPublishCourse(data, userId, courseId) ||
-    hasAnyRole(data, userId, ["AUTHOR"]) ||
+    hasAnyRole(data, userId, ["PLATFORM_ADMIN", "LEARNING_ADMIN"]) ||
     data.courseContributors.some((contributor) => contributor.courseId === courseId && contributor.userId === userId)
   );
 }
@@ -152,6 +167,100 @@ function audit(data: AppData, actorId: string | undefined, action: string, objec
 
 function notify(data: AppData, userId: string, type: string, title: string, body: string, href: string) {
   data.notifications.push({ id: id("note"), userId, type, title, body, href, createdAt: now(), updatedAt: now() } satisfies Notification);
+}
+
+export type ReadinessSeverity = "BLOCKING" | "WARNING" | "READY";
+
+export interface CourseReadinessCheck {
+  category: "Basics" | "Learning Objectives" | "Curriculum" | "Lesson Content" | "Assessment" | "Compliance Mapping" | "Audience" | "Completion" | "Review Approval";
+  label: string;
+  severity: ReadinessSeverity;
+  message: string;
+  href: string;
+}
+
+export interface CourseReadiness {
+  percentage: number;
+  checks: CourseReadinessCheck[];
+  blockingIssues: CourseReadinessCheck[];
+  warnings: CourseReadinessCheck[];
+  completedChecks: CourseReadinessCheck[];
+}
+
+export function calculateCourseReadiness(data: AppData, courseId: string): CourseReadiness {
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course) {
+    return { percentage: 0, checks: [], blockingIssues: [], warnings: [], completedChecks: [] };
+  }
+  const versionId = course.draftVersionId ?? course.currentVersionId;
+  const modules = data.modules.filter((module) => module.courseVersionId === versionId);
+  const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === versionId);
+  const blocks = data.contentBlocks.filter((block) => lessons.some((lesson) => lesson.id === block.lessonId));
+  const objectives = data.learningObjectives.filter((objective) => objective.courseVersionId === versionId);
+  const assessment = data.assessments.find((item) => item.courseVersionId === versionId);
+  const assessmentQuestionCount = assessment ? data.assessmentQuestions.filter((item) => item.assessmentId === assessment.id).length : 0;
+  const mappings = data.courseStandardMappings.filter((mapping) => mapping.courseId === courseId);
+  const grants = data.courseAccessGrants.filter((grant) => grant.courseId === courseId);
+  const latestReview = latestCourseReview(data, courseId);
+  const openBlockingComments = latestReview
+    ? data.reviewComments.filter((comment) => comment.reviewId === latestReview.id && comment.status === "OPEN" && (comment.blocking || comment.severity === "BLOCKING"))
+    : [];
+  const requiredAssessment = course.requireFinalAssessment ?? course.finalAssessmentEnabled ?? true;
+  const checks: CourseReadinessCheck[] = [
+    readyCheck("Basics", "Course details", Boolean(course.title.trim() && course.shortDescription.trim() && course.estimatedMinutes > 0), "Title, description, and duration are required.", "overview"),
+    readyCheck("Learning Objectives", "Learning objectives", objectives.length > 0, "Add at least one learning objective.", "compliance"),
+    readyCheck("Curriculum", "Modules and lessons", modules.length > 0 && lessons.length > 0, "Add at least one module and one lesson.", "curriculum"),
+    readyCheck("Lesson Content", "Lesson content", lessons.length > 0 && lessons.every((lesson) => blocks.some((block) => block.lessonId === lesson.id)), "Every lesson should contain content.", "curriculum"),
+    requiredAssessment
+      ? readyCheck("Assessment", "Final assessment", Boolean(assessment && assessment.passingScore > 0 && assessmentQuestionCount >= 3), "A final assessment needs at least 3 questions and a passing score.", "assessment")
+      : warningCheck("Assessment", "Final assessment", "Assessment is disabled for this course.", "assessment"),
+    readyCheck("Compliance Mapping", "Mapped standards", mappings.length > 0, "Map the course to at least one NERC CIP standard.", "compliance"),
+    readyCheck("Audience", "Audience and access", course.accessMode === "OPEN" || grants.length > 0 || course.showInCatalog, "Configure catalog visibility or add an access audience.", "audience"),
+    readyCheck("Completion", "Completion rules", Boolean(course.requireAllLessons ?? true) || Boolean(course.requireFinalAssessment), "Define at least one completion requirement.", "completion"),
+    latestReview?.status === "APPROVED" || course.status === "APPROVED" || course.status === "PUBLISHED"
+      ? readyCheck("Review Approval", "Review approval", true, "Course review is approved.", "review")
+      : warningCheck("Review Approval", "Review approval", "Approval is required before publishing.", "review")
+  ];
+  if (openBlockingComments.length) {
+    checks.push({
+      category: "Review Approval",
+      label: "Blocking review comments",
+      severity: "BLOCKING",
+      message: `${openBlockingComments.length} blocking review comment${openBlockingComments.length === 1 ? "" : "s"} must be resolved.`,
+      href: `/build/courses/${courseId}?tab=review`
+    });
+  }
+  const completedChecks = checks.filter((check) => check.severity === "READY");
+  const blockingIssues = checks.filter((check) => check.severity === "BLOCKING");
+  const warnings = checks.filter((check) => check.severity === "WARNING");
+  return {
+    percentage: Math.round((completedChecks.length / checks.length) * 100),
+    checks,
+    blockingIssues,
+    warnings,
+    completedChecks
+  };
+}
+
+function readyCheck(category: CourseReadinessCheck["category"], label: string, isReady: boolean, message: string, tab: string): CourseReadinessCheck {
+  return {
+    category,
+    label,
+    severity: isReady ? "READY" : "BLOCKING",
+    message: isReady ? "Ready" : message,
+    href: `?tab=${tab}`
+  };
+}
+
+function warningCheck(category: CourseReadinessCheck["category"], label: string, message: string, tab: string): CourseReadinessCheck {
+  return { category, label, severity: "WARNING", message, href: `?tab=${tab}` };
+}
+
+function latestCourseReview(data: AppData, courseId: string) {
+  const versionIds = data.courseVersions.filter((version) => version.courseId === courseId).map((version) => version.id);
+  return data.reviews
+    .filter((review) => versionIds.includes(review.courseVersionId))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0];
 }
 
 export class AuthService {
@@ -309,28 +418,534 @@ export class WorkflowService {
     });
   }
 
-  async publishCourse(courseId: string) {
-    const course = this.data.courses.find((item) => item.id === courseId)!;
-    const version = this.data.courseVersions.find((item) => item.id === course.currentVersionId)!;
-    course.status = "PUBLISHED";
+  async createCourseDraft(input: {
+    title: string;
+    description: string;
+    category: string;
+    difficulty: string;
+    estimatedMinutes: number;
+    icon: string;
+    accent: string;
+    coverVisual?: string;
+    accessMode: Course["accessMode"];
+    showInCatalog: boolean;
+    allowSelfEnrollment: boolean;
+    allowAccessRequests: boolean;
+    requireManagerApproval: boolean;
+    standardVersionIds: string[];
+    mappings?: Array<{ standardVersionId: string; requirementText?: string; trainingRelevance?: string; evidenceExpectation: string; internalNotes?: string }>;
+    objectives: string[];
+    skillIds: string[];
+    completionEvidence: string[];
+    modules: Array<{ title: string; lessons: string[] }>;
+    audienceGrants: Array<{ grantType: CourseAccessGrant["grantType"]; grantId: string }>;
+    completion: {
+      requireAllLessons: boolean;
+      requireFinalAssessment: boolean;
+      requireScenarios: boolean;
+      requireAcknowledgement: boolean;
+      requireManagerValidation: boolean;
+      finalAssessmentEnabled: boolean;
+      passingScore: number;
+      attemptsAllowed: number;
+      failedAttemptBehavior: Course["failedAttemptBehavior"];
+      randomizeQuestions: boolean;
+      randomizeAnswers: boolean;
+      showAnswersAfterAttempt: boolean;
+      certificateEnabled: boolean;
+      certificateName: string;
+      certificateExpirationMonths?: number;
+      completionDeadlineDays?: number;
+    };
+  }) {
+    const course: Course = {
+      id: id("course"),
+      organizationId: this.data.organizations[0].id,
+      slug: input.title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, ""),
+      title: input.title,
+      shortDescription: input.description,
+      category: input.category,
+      difficulty: input.difficulty,
+      estimatedMinutes: input.estimatedMinutes,
+      status: "DRAFT",
+      accessMode: input.accessMode,
+      allowSelfEnrollment: input.allowSelfEnrollment,
+      showInCatalog: input.showInCatalog,
+      allowAccessRequests: input.allowAccessRequests,
+      requireManagerApproval: input.requireManagerApproval,
+      certificateEnabled: input.completion.certificateEnabled,
+      ownerId: this.actorId,
+      icon: input.icon,
+      accent: input.accent,
+      coverVisual: input.coverVisual,
+      completionEvidence: input.completionEvidence,
+      completionDeadlineDays: input.completion.completionDeadlineDays,
+      requireAllLessons: input.completion.requireAllLessons,
+      requireFinalAssessment: input.completion.requireFinalAssessment,
+      requireScenarios: input.completion.requireScenarios,
+      requireAcknowledgement: input.completion.requireAcknowledgement,
+      requireManagerValidation: input.completion.requireManagerValidation,
+      finalAssessmentEnabled: input.completion.finalAssessmentEnabled,
+      attemptsAllowed: input.completion.attemptsAllowed,
+      failedAttemptBehavior: input.completion.failedAttemptBehavior,
+      randomizeQuestions: input.completion.randomizeQuestions,
+      randomizeAnswers: input.completion.randomizeAnswers,
+      showAnswersAfterAttempt: input.completion.showAnswersAfterAttempt,
+      certificateName: input.completion.certificateName,
+      certificateExpirationMonths: input.completion.certificateExpirationMonths,
+      createdAt: now(),
+      updatedAt: now()
+    };
+    const version: CourseVersion = {
+      id: id("version"),
+      courseId: course.id,
+      version: "1.0",
+      status: "DRAFT",
+      summary: input.description,
+      goal: input.objectives[0] ?? "Build repeatable compliance readiness.",
+      immutable: false,
+      completionRules: [
+        input.completion.requireAllLessons ? "LESSONS" : "",
+        input.completion.requireFinalAssessment ? "ASSESSMENT" : "",
+        input.completion.requireAcknowledgement ? "ACKNOWLEDGEMENT" : "",
+        input.completion.requireManagerValidation ? "MANAGER_VALIDATION" : ""
+      ].filter(Boolean),
+      createdAt: now(),
+      updatedAt: now()
+    };
+    course.currentVersionId = version.id;
+    course.draftVersionId = version.id;
+    this.data.courses.push(course);
+    this.data.courseVersions.push(version);
+    this.data.courseOwners.push({ id: id("owner"), courseId: course.id, userId: this.actorId, createdAt: now(), updatedAt: now() });
+    this.data.courseAccessPolicies.push({ id: id("policy"), courseId: course.id, mode: course.accessMode, createdAt: now(), updatedAt: now() });
+    input.audienceGrants.forEach((grant) => this.data.courseAccessGrants.push({ id: id("grant"), courseId: course.id, ...grant, createdAt: now(), updatedAt: now() }));
+    input.modules.forEach((moduleInput, index) => this.addModuleInternal(version.id, moduleInput.title, moduleInput.lessons, index + 1));
+    input.objectives.forEach((text, index) => this.data.learningObjectives.push({ id: id("obj"), courseVersionId: version.id, text, position: index + 1, createdAt: now(), updatedAt: now() }));
+    const mappings = input.mappings?.length
+      ? input.mappings
+      : input.standardVersionIds.map((standardVersionId) => ({ standardVersionId, evidenceExpectation: input.completionEvidence.join(", ") || "Course completion evidence." }));
+    mappings.forEach((mapping) => this.data.courseStandardMappings.push({ id: id("mapping"), courseId: course.id, createdAt: now(), updatedAt: now(), ...mapping }));
+    input.skillIds.forEach((skillId) => this.data.courseSkills.push({ id: id("courseskill"), courseId: course.id, skillId, level: input.difficulty, createdAt: now(), updatedAt: now() }));
+    if (input.completion.finalAssessmentEnabled) this.addAssessmentInternal(version.id, `${input.title} Final Assessment`, input.completion.passingScore);
+    audit(this.data, this.actorId, "COURSE_CREATED", "Course", course.id, `Created course ${course.title}.`);
+    await this.persist();
+    return course;
+  }
+
+  async updateCourse(courseId: string, patch: Partial<Course>) {
+    const course = this.requireCourse(courseId);
+    Object.assign(course, patch, { updatedAt: now() });
+    const policy = this.data.courseAccessPolicies.find((item) => item.courseId === courseId);
+    if (policy) {
+      policy.mode = course.accessMode;
+      policy.updatedAt = now();
+    }
+    audit(this.data, this.actorId, "COURSE_EDITED", "Course", courseId, `Updated ${course.title}.`);
+    await this.persist();
+    return course;
+  }
+
+  async duplicateCourse(courseId: string, name?: string, includeAudience = false) {
+    const source = this.requireCourse(courseId);
+    const sourceVersion = this.requireCurrentVersion(source);
+    const copy: Course = {
+      ...source,
+      id: id("course"),
+      slug: `${source.slug}-copy-${Date.now()}`,
+      title: name || `Copy of ${source.title}`,
+      status: "DRAFT",
+      currentVersionId: undefined,
+      draftVersionId: undefined,
+      ownerId: this.actorId,
+      publishedById: undefined,
+      scheduledPublishAt: undefined,
+      archivedAt: undefined,
+      archiveReason: undefined,
+      createdAt: now(),
+      updatedAt: now()
+    };
+    const version: CourseVersion = { ...sourceVersion, id: id("version"), courseId: copy.id, status: "DRAFT", publishedAt: undefined, publishedById: undefined, immutable: false, versionNotes: "Duplicated course draft.", createdAt: now(), updatedAt: now() };
+    copy.currentVersionId = version.id;
+    copy.draftVersionId = version.id;
+    this.data.courses.push(copy);
+    this.data.courseVersions.push(version);
+    this.data.courseOwners.push({ id: id("owner"), courseId: copy.id, userId: this.actorId, createdAt: now(), updatedAt: now() });
+    this.data.courseAccessPolicies.push({ id: id("policy"), courseId: copy.id, mode: copy.accessMode, createdAt: now(), updatedAt: now() });
+    if (includeAudience) {
+      this.data.courseAccessGrants
+        .filter((grant) => grant.courseId === courseId)
+        .forEach((grant) => this.data.courseAccessGrants.push({ ...grant, id: id("grant"), courseId: copy.id, createdAt: now(), updatedAt: now() }));
+    }
+    this.cloneVersionContent(sourceVersion.id, version.id);
+    audit(this.data, this.actorId, "COURSE_CREATED", "Course", copy.id, `Duplicated ${source.title}.`);
+    await this.persist();
+    return copy;
+  }
+
+  async archiveCourse(courseId: string, reason: string) {
+    const course = this.requireCourse(courseId);
+    course.status = "ARCHIVED";
+    course.archiveReason = reason;
+    course.archivedAt = now();
     course.updatedAt = now();
-    version.status = "PUBLISHED";
-    version.immutable = true;
-    version.publishedAt = now();
-    audit(this.data, this.actorId, "COURSE_PUBLISHED", "Course", course.id, `Published ${course.title}.`);
+    audit(this.data, this.actorId, "COURSE_ARCHIVED", "Course", courseId, `Archived ${course.title}. ${reason}`.trim());
     await this.persist();
   }
 
+  async restoreCourse(courseId: string) {
+    const course = this.requireCourse(courseId);
+    course.status = "DRAFT";
+    course.archiveReason = undefined;
+    course.archivedAt = undefined;
+    course.updatedAt = now();
+    audit(this.data, this.actorId, "COURSE_RESTORED", "Course", courseId, `Restored ${course.title}.`);
+    await this.persist();
+  }
+
+  async createCourseVersion(courseId: string, type: "MINOR" | "MAJOR", summary: string, copyContent = true) {
+    const course = this.requireCourse(courseId);
+    const current = this.requireCurrentVersion(course);
+    const [major, minor] = current.version.split(".").map((part) => Number(part));
+    const nextVersion = type === "MAJOR" ? `${major + 1}.0` : `${major}.${minor + 1}`;
+    const version: CourseVersion = { id: id("version"), courseId, version: nextVersion, status: "DRAFT", summary, goal: current.goal, immutable: false, completionRules: [...current.completionRules], createdAt: now(), updatedAt: now() };
+    this.data.courseVersions.push(version);
+    if (copyContent) this.cloneVersionContent(current.id, version.id);
+    course.status = "DRAFT";
+    course.currentVersionId = version.id;
+    course.draftVersionId = version.id;
+    course.updatedAt = now();
+    audit(this.data, this.actorId, "COURSE_VERSION_CREATED", "Course", courseId, `Created draft version ${nextVersion}.`);
+    await this.persist();
+    return version;
+  }
+
+  async addModule(courseId: string, title: string) {
+    const version = this.requireCurrentVersion(this.requireCourse(courseId));
+    const position = this.data.modules.filter((module) => module.courseVersionId === version.id).length + 1;
+    const moduleRecord: Module = { id: id("module"), courseVersionId: version.id, title, position, createdAt: now(), updatedAt: now() };
+    this.data.modules.push(moduleRecord);
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "MODULE_CREATED", "Course", courseId, `Added module ${title}.`);
+    await this.persist();
+    return moduleRecord;
+  }
+
+  async updateModule(moduleId: string, patch: Partial<Module>) {
+    const moduleRecord = this.data.modules.find((item) => item.id === moduleId)!;
+    Object.assign(moduleRecord, patch, { updatedAt: now() });
+    const course = this.courseForVersion(moduleRecord.courseVersionId);
+    if (course) this.touchCourse(course.id);
+    audit(this.data, this.actorId, "MODULE_UPDATED", "Course", course?.id ?? moduleId, `Updated module ${moduleRecord.title}.`);
+    await this.persist();
+  }
+
+  async deleteModule(moduleId: string) {
+    const moduleRecord = this.data.modules.find((item) => item.id === moduleId)!;
+    const course = this.courseForVersion(moduleRecord.courseVersionId);
+    const lessonIds = this.data.lessons.filter((lesson) => lesson.moduleId === moduleId).map((lesson) => lesson.id);
+    this.data.contentBlocks = this.data.contentBlocks.filter((block) => !lessonIds.includes(block.lessonId));
+    this.data.lessons = this.data.lessons.filter((lesson) => lesson.moduleId !== moduleId);
+    this.data.modules = this.data.modules.filter((module) => module.id !== moduleId);
+    if (course) this.touchCourse(course.id);
+    audit(this.data, this.actorId, "MODULE_DELETED", "Course", course?.id ?? moduleId, `Deleted module ${moduleRecord.title}.`);
+    await this.persist();
+  }
+
+  async reorderModules(courseId: string, moduleIds: string[]) {
+    moduleIds.forEach((moduleId, index) => {
+      const moduleRecord = this.data.modules.find((module) => module.id === moduleId);
+      if (moduleRecord) {
+        moduleRecord.position = index + 1;
+        moduleRecord.updatedAt = now();
+      }
+    });
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "MODULES_REORDERED", "Course", courseId, "Reordered modules.");
+    await this.persist();
+  }
+
+  async addLesson(courseId: string, moduleId: string, title: string) {
+    const version = this.requireCurrentVersion(this.requireCourse(courseId));
+    const position = this.data.lessons.filter((lesson) => lesson.moduleId === moduleId).length + 1;
+    const lesson: Lesson = { id: id("lesson"), moduleId, courseVersionId: version.id, title, slug: title.toLowerCase().replace(/[^a-z0-9]+/g, "-"), position, required: true, estimatedMinutes: 8, createdAt: now(), updatedAt: now() };
+    this.data.lessons.push(lesson);
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "LESSON_CREATED", "Course", courseId, `Added lesson ${title}.`);
+    await this.persist();
+    return lesson;
+  }
+
+  async updateLesson(lessonId: string, patch: Partial<Lesson>) {
+    const lesson = this.data.lessons.find((item) => item.id === lessonId)!;
+    Object.assign(lesson, patch, { updatedAt: now() });
+    const course = this.courseForVersion(lesson.courseVersionId);
+    if (course) this.touchCourse(course.id);
+    audit(this.data, this.actorId, "LESSON_UPDATED", "Course", course?.id ?? lessonId, `Updated lesson ${lesson.title}.`);
+    await this.persist();
+  }
+
+  async deleteLesson(lessonId: string) {
+    const lesson = this.data.lessons.find((item) => item.id === lessonId)!;
+    const course = this.courseForVersion(lesson.courseVersionId);
+    this.data.contentBlocks = this.data.contentBlocks.filter((block) => block.lessonId !== lessonId);
+    this.data.lessons = this.data.lessons.filter((item) => item.id !== lessonId);
+    if (course) this.touchCourse(course.id);
+    audit(this.data, this.actorId, "LESSON_DELETED", "Course", course?.id ?? lessonId, `Deleted lesson ${lesson.title}.`);
+    await this.persist();
+  }
+
+  async reorderLessons(courseId: string, moduleId: string, lessonIds: string[]) {
+    lessonIds.forEach((lessonId, index) => {
+      const lesson = this.data.lessons.find((item) => item.id === lessonId && item.moduleId === moduleId);
+      if (lesson) {
+        lesson.position = index + 1;
+        lesson.updatedAt = now();
+      }
+    });
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "LESSONS_REORDERED", "Course", courseId, "Reordered lessons.");
+    await this.persist();
+  }
+
+  async addContentBlock(courseId: string, lessonId: string, type: string, title: string, body: string, data?: unknown) {
+    const position = this.data.contentBlocks.filter((block) => block.lessonId === lessonId).length + 1;
+    const block: ContentBlock = { id: id("block"), lessonId, type, title, body, data, position, createdAt: now(), updatedAt: now() };
+    this.data.contentBlocks.push(block);
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "CONTENT_BLOCK_CREATED", "Course", courseId, `Added ${title || type} block.`);
+    await this.persist();
+    return block;
+  }
+
+  async updateContentBlock(courseId: string, blockId: string, patch: Partial<ContentBlock>) {
+    const block = this.data.contentBlocks.find((item) => item.id === blockId)!;
+    Object.assign(block, patch, { updatedAt: now() });
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "CONTENT_BLOCK_UPDATED", "Course", courseId, `Updated ${block.title ?? block.type} block.`);
+    await this.persist();
+  }
+
+  async duplicateContentBlock(courseId: string, blockId: string) {
+    const source = this.data.contentBlocks.find((item) => item.id === blockId)!;
+    const copy: ContentBlock = { ...source, id: id("block"), position: source.position + 1, createdAt: now(), updatedAt: now() };
+    this.data.contentBlocks.push(copy);
+    await this.reorderContentBlocks(courseId, source.lessonId, this.data.contentBlocks.filter((block) => block.lessonId === source.lessonId).sort((a, b) => a.position - b.position).map((block) => block.id));
+    audit(this.data, this.actorId, "CONTENT_BLOCK_CREATED", "Course", courseId, `Duplicated ${source.title ?? source.type} block.`);
+    await this.persist();
+    return copy;
+  }
+
+  async deleteContentBlock(courseId: string, blockId: string) {
+    const source = this.data.contentBlocks.find((item) => item.id === blockId)!;
+    this.data.contentBlocks = this.data.contentBlocks.filter((block) => block.id !== blockId);
+    this.touchCourse(courseId);
+    audit(this.data, this.actorId, "CONTENT_BLOCK_DELETED", "Course", courseId, `Deleted ${source.title ?? source.type} block.`);
+    await this.persist();
+  }
+
+  async reorderContentBlocks(courseId: string, lessonId: string, blockIds: string[]) {
+    blockIds.forEach((blockId, index) => {
+      const block = this.data.contentBlocks.find((item) => item.id === blockId && item.lessonId === lessonId);
+      if (block) {
+        block.position = index + 1;
+        block.updatedAt = now();
+      }
+    });
+    this.touchCourse(courseId);
+    await this.persist();
+  }
+
+  async createQuestion(input: { assessmentId?: string; type: QuestionType; prompt: string; explanation: string; options: Array<{ text: string; isCorrect: boolean; match?: string }>; difficulty?: string; tags?: string[] }) {
+    const question: Question = { id: id("question"), type: input.type, prompt: input.prompt, explanation: input.explanation, difficulty: input.difficulty ?? "Foundational", tags: input.tags ?? ["NERC CIP"], createdAt: now(), updatedAt: now() };
+    this.data.questions.push(question);
+    input.options.forEach((option, index) => this.data.questionOptions.push({ id: id("option"), questionId: question.id, text: option.text, isCorrect: option.isCorrect, match: option.match, position: index + 1, createdAt: now(), updatedAt: now() }));
+    if (input.assessmentId) await this.addQuestionToAssessment(input.assessmentId, question.id, 1, false);
+    await this.persist();
+    return question;
+  }
+
+  async updateQuestion(questionId: string, patch: Partial<Question>) {
+    const question = this.data.questions.find((item) => item.id === questionId)!;
+    Object.assign(question, patch, { updatedAt: now() });
+    audit(this.data, this.actorId, "QUESTION_UPDATED", "Question", questionId, `Updated question.`);
+    await this.persist();
+  }
+
+  async deleteQuestion(questionId: string) {
+    this.data.assessmentQuestions = this.data.assessmentQuestions.filter((item) => item.questionId !== questionId);
+    this.data.questionOptions = this.data.questionOptions.filter((option) => option.questionId !== questionId);
+    this.data.questions = this.data.questions.filter((question) => question.id !== questionId);
+    audit(this.data, this.actorId, "QUESTION_DELETED", "Question", questionId, "Deleted question.");
+    await this.persist();
+  }
+
+  async addQuestionToAssessment(assessmentId: string, questionId: string, points = 1, shouldPersist = true) {
+    if (!this.data.assessmentQuestions.some((item) => item.assessmentId === assessmentId && item.questionId === questionId)) {
+      const position = this.data.assessmentQuestions.filter((item) => item.assessmentId === assessmentId).length + 1;
+      this.data.assessmentQuestions.push({ id: id("aq"), assessmentId, questionId, points, position, createdAt: now(), updatedAt: now() } satisfies AssessmentQuestion);
+    }
+    if (shouldPersist) await this.persist();
+  }
+
+  async removeQuestionFromAssessment(assessmentId: string, questionId: string) {
+    this.data.assessmentQuestions = this.data.assessmentQuestions.filter((item) => !(item.assessmentId === assessmentId && item.questionId === questionId));
+    await this.persist();
+  }
+
+  async requestCourseReview(courseId: string, reviewerIds: string[], dueAt: string, message: string, requireAllReviewers: boolean) {
+    const course = this.requireCourse(courseId);
+    const readiness = calculateCourseReadiness(this.data, courseId);
+    if (readiness.blockingIssues.length) throw new Error(readiness.blockingIssues.map((issue) => issue.message).join("\n"));
+    const version = this.requireCurrentVersion(course);
+    course.status = "IN_REVIEW";
+    course.updatedAt = now();
+    version.status = "IN_REVIEW";
+    version.updatedAt = now();
+    const review: Review = { id: id("review"), courseVersionId: version.id, status: "OPEN", dueAt, submittedAt: now(), message, requireAllReviewers, createdAt: now(), updatedAt: now() };
+    this.data.reviews.push(review);
+    reviewerIds.forEach((userId) => {
+      this.data.reviewAssignments.push({ id: id("reviewassign"), reviewId: review.id, userId, createdAt: now(), updatedAt: now() });
+      notify(this.data, userId, "REVIEW_REQUEST", "Course review requested", `${course.title} is ready for review.`, `/build/courses/${courseId}?tab=review`);
+    });
+    audit(this.data, this.actorId, "COURSE_SUBMITTED", "Course", courseId, `Submitted ${course.title} for review.`);
+    await this.persist();
+    return review;
+  }
+
+  async addReviewComment(reviewId: string, body: string, severity: ReviewComment["severity"], location = "Course Overview", blockId?: string) {
+    const comment: ReviewComment = { id: id("comment"), reviewId, authorId: this.actorId, body, blockId, location, severity, blocking: severity === "BLOCKING", status: "OPEN", replies: [], createdAt: now(), updatedAt: now() };
+    this.data.reviewComments.push(comment);
+    const review = this.data.reviews.find((item) => item.id === reviewId);
+    const course = review ? this.courseForVersion(review.courseVersionId) : undefined;
+    if (course) {
+      notify(this.data, course.ownerId, "REVIEW_COMMENT", "Review comment added", body, `/build/courses/${course.id}?tab=review`);
+      audit(this.data, this.actorId, "REVIEW_COMMENT_CREATED", "Course", course.id, `Added review comment.`);
+    }
+    await this.persist();
+    return comment;
+  }
+
+  async resolveReviewComment(commentId: string, reply?: string) {
+    const comment = this.data.reviewComments.find((item) => item.id === commentId)!;
+    comment.status = "RESOLVED";
+    comment.resolvedBy = this.actorId;
+    comment.resolvedAt = now();
+    comment.updatedAt = now();
+    if (reply) comment.replies = [...comment.replies, reply];
+    const review = this.data.reviews.find((item) => item.id === comment.reviewId);
+    const course = review ? this.courseForVersion(review.courseVersionId) : undefined;
+    if (course) audit(this.data, this.actorId, "REVIEW_COMMENT_RESOLVED", "Course", course.id, `Resolved review comment.`);
+    await this.persist();
+  }
+
+  async requestChanges(reviewId: string, comment: string) {
+    const review = this.data.reviews.find((item) => item.id === reviewId)!;
+    const course = this.courseForVersion(review.courseVersionId)!;
+    review.status = "CHANGES_REQUESTED";
+    review.updatedAt = now();
+    course.status = "CHANGES_REQUESTED";
+    course.updatedAt = now();
+    this.data.approvals.push({ id: id("approval"), reviewId, approverId: this.actorId, decision: "CHANGES_REQUESTED", comment, createdAt: now(), updatedAt: now() });
+    notify(this.data, course.ownerId, "CHANGES_REQUESTED", "Changes requested", comment, `/build/courses/${course.id}?tab=review`);
+    audit(this.data, this.actorId, "COURSE_CHANGES_REQUESTED", "Course", course.id, `Requested changes for ${course.title}.`);
+    await this.persist();
+  }
+
+  async approveCourseReview(reviewId: string, comment = "Approved for publication.") {
+    const review = this.data.reviews.find((item) => item.id === reviewId)!;
+    const course = this.courseForVersion(review.courseVersionId)!;
+    review.status = "APPROVED";
+    review.updatedAt = now();
+    course.status = "APPROVED";
+    course.updatedAt = now();
+    this.data.approvals.push({ id: id("approval"), reviewId, approverId: this.actorId, decision: "APPROVED", comment, createdAt: now(), updatedAt: now() });
+    notify(this.data, course.ownerId, "REVIEW_APPROVED", "Course approved", `${course.title} is approved for publication.`, `/build/courses/${course.id}?tab=review`);
+    audit(this.data, this.actorId, "COURSE_APPROVED", "Course", course.id, `Approved ${course.title}.`);
+    await this.persist();
+  }
+
+  async resubmitCourseReview(courseId: string) {
+    const course = this.requireCourse(courseId);
+    course.status = "IN_REVIEW";
+    course.updatedAt = now();
+    audit(this.data, this.actorId, "COURSE_RESUBMITTED", "Course", courseId, `Resubmitted ${course.title} for review.`);
+    await this.persist();
+  }
+
+  calculateCourseReadiness(courseId: string) {
+    return calculateCourseReadiness(this.data, courseId);
+  }
+
+  async publishCourse(courseId: string, options?: { scheduledPublishAt?: string; showInCatalog?: boolean; allowSelfEnrollment?: boolean; certificateEnabled?: boolean; versionNotes?: string }) {
+    const course = this.requireCourse(courseId);
+    const version = this.requireCurrentVersion(course);
+    const readiness = calculateCourseReadiness(this.data, courseId);
+    if (readiness.blockingIssues.length) throw new Error(readiness.blockingIssues.map((issue) => issue.message).join("\n"));
+    if (course.status !== "APPROVED" && course.status !== "PUBLISHED") throw new Error("Course must be approved before publishing.");
+    if (options?.scheduledPublishAt) {
+      course.status = "SCHEDULED";
+      course.scheduledPublishAt = options.scheduledPublishAt;
+      version.status = "SCHEDULED";
+      version.scheduledPublishAt = options.scheduledPublishAt;
+      audit(this.data, this.actorId, "COURSE_PUBLISHED", "Course", course.id, `Scheduled ${course.title} for publication.`);
+    } else {
+      course.status = "PUBLISHED";
+      course.publishedById = this.actorId;
+      course.scheduledPublishAt = undefined;
+      version.status = "PUBLISHED";
+      version.immutable = true;
+      version.publishedAt = now();
+      version.publishedById = this.actorId;
+      audit(this.data, this.actorId, "COURSE_PUBLISHED", "Course", course.id, `Published ${course.title} version ${version.version}.`);
+    }
+    if (typeof options?.showInCatalog === "boolean") course.showInCatalog = options.showInCatalog;
+    if (typeof options?.allowSelfEnrollment === "boolean") course.allowSelfEnrollment = options.allowSelfEnrollment;
+    if (typeof options?.certificateEnabled === "boolean") course.certificateEnabled = options.certificateEnabled;
+    version.versionNotes = options?.versionNotes;
+    course.updatedAt = now();
+    version.updatedAt = now();
+    await this.persist();
+  }
+
+  async scheduleCoursePublication(courseId: string, publishAt: string, versionNotes: string) {
+    return this.publishCourse(courseId, { scheduledPublishAt: publishAt, versionNotes });
+  }
+
   async assignCourse(courseId: string, userId: string, dueAt: string) {
-    const course = this.data.courses.find((item) => item.id === courseId)!;
-    const assignment: Assignment = { id: id("assign"), organizationId: this.data.organizations[0].id, title: `Assigned ${course.title}`, targetType: "COURSE", targetId: courseId, createdById: this.actorId, dueAt, recurrence: "NONE", status: "ACTIVE", createdAt: now(), updatedAt: now() };
+    return this.createAssignment(courseId, [{ audienceType: "USER", audienceId: userId }], dueAt, "NONE");
+  }
+
+  async createAssignment(courseId: string, audiences: Array<Pick<AssignmentAudience, "audienceType" | "audienceId">>, dueAt: string, recurrence: Assignment["recurrence"], notificationSettings: Record<string, boolean> = {}) {
+    const course = this.requireCourse(courseId);
+    const assignment: Assignment = { id: id("assign"), organizationId: this.data.organizations[0].id, title: `Assigned ${course.title}`, targetType: "COURSE", targetId: courseId, createdById: this.actorId, dueAt, assignedAt: now(), recurrence, status: "ACTIVE", notificationSettings, createdAt: now(), updatedAt: now() };
     this.data.assignments.push(assignment);
-    this.data.assignmentAudiences.push({ id: id("aud"), assignmentId: assignment.id, audienceType: "USER", audienceId: userId, createdAt: now(), updatedAt: now() });
-    this.data.enrollments.push({ id: id("enroll"), organizationId: this.data.organizations[0].id, userId, courseId, assignmentId: assignment.id, status: "NOT_STARTED", createdAt: now(), updatedAt: now() });
-    notify(this.data, userId, "COURSE_ASSIGNED", "Training assigned", `${course.title} is assigned to you.`, `/courses/${courseId}`);
-    audit(this.data, this.actorId, "ASSIGNMENT_CREATED", "Assignment", assignment.id, `Assigned ${course.title}.`);
+    audiences.forEach((audience) => this.data.assignmentAudiences.push({ id: id("aud"), assignmentId: assignment.id, ...audience, createdAt: now(), updatedAt: now() }));
+    const learnerIds = this.resolveAudienceLearners(audiences);
+    learnerIds.forEach((userId) => {
+      if (!this.data.enrollments.some((item) => item.userId === userId && item.courseId === courseId && item.assignmentId === assignment.id)) {
+        this.data.enrollments.push({ id: id("enroll"), organizationId: this.data.organizations[0].id, userId, courseId, assignmentId: assignment.id, status: "NOT_STARTED", createdAt: now(), updatedAt: now() });
+      }
+      if (notificationSettings.notifyLearners !== false) notify(this.data, userId, "COURSE_ASSIGNED", "Training assigned", `${course.title} is assigned to you.`, `/courses/${courseId}`);
+    });
+    audit(this.data, this.actorId, "ASSIGNMENT_CREATED", "Assignment", assignment.id, `Assigned ${course.title} to ${learnerIds.length} learners.`);
     await this.persist();
     return assignment;
+  }
+
+  async sendLearnerReminder(courseId: string, userId: string) {
+    const course = this.requireCourse(courseId);
+    notify(this.data, userId, "TRAINING_REMINDER", "Training reminder", `${course.title} is still assigned.`, `/courses/${courseId}`);
+    audit(this.data, this.actorId, "REMINDER_SENT", "Course", courseId, `Sent reminder for ${course.title}.`);
+    await this.persist();
+  }
+
+  async extendAssignmentDueDate(assignmentId: string, dueAt: string) {
+    const assignment = this.data.assignments.find((item) => item.id === assignmentId)!;
+    assignment.dueAt = dueAt;
+    assignment.updatedAt = now();
+    audit(this.data, this.actorId, "ASSIGNMENT_EXTENDED", "Assignment", assignmentId, `Extended assignment due date.`);
+    await this.persist();
   }
 
   async requestAccess(courseId: string, reason: string) {
@@ -441,6 +1056,78 @@ export class WorkflowService {
     this.data.certifications.push(cert);
     this.data.certificationRequirements.push({ id: id("certreq"), certificationId: cert.id, type: "COURSE", targetId: course.id, createdAt: now(), updatedAt: now() });
     return cert.id;
+  }
+
+  private requireCourse(courseId: string) {
+    const course = this.data.courses.find((item) => item.id === courseId);
+    if (!course) throw new Error("Course not found.");
+    return course;
+  }
+
+  private requireCurrentVersion(course: Course) {
+    const version = this.data.courseVersions.find((item) => item.id === (course.draftVersionId ?? course.currentVersionId));
+    if (!version) throw new Error("Course version not found.");
+    return version;
+  }
+
+  private courseForVersion(courseVersionId: string) {
+    return this.data.courses.find((course) => course.currentVersionId === courseVersionId || course.draftVersionId === courseVersionId || this.data.courseVersions.some((version) => version.courseId === course.id && version.id === courseVersionId));
+  }
+
+  private touchCourse(courseId: string) {
+    const course = this.data.courses.find((item) => item.id === courseId);
+    if (course) course.updatedAt = now();
+  }
+
+  private cloneVersionContent(sourceVersionId: string, targetVersionId: string) {
+    const moduleIdMap = new Map<string, string>();
+    const lessonIdMap = new Map<string, string>();
+    this.data.modules
+      .filter((module) => module.courseVersionId === sourceVersionId)
+      .sort((left, right) => left.position - right.position)
+      .forEach((module) => {
+        const moduleId = id("module");
+        moduleIdMap.set(module.id, moduleId);
+        this.data.modules.push({ ...module, id: moduleId, courseVersionId: targetVersionId, createdAt: now(), updatedAt: now() });
+      });
+    this.data.lessons
+      .filter((lesson) => lesson.courseVersionId === sourceVersionId)
+      .sort((left, right) => left.position - right.position)
+      .forEach((lesson) => {
+        const lessonId = id("lesson");
+        lessonIdMap.set(lesson.id, lessonId);
+        this.data.lessons.push({ ...lesson, id: lessonId, moduleId: moduleIdMap.get(lesson.moduleId)!, courseVersionId: targetVersionId, createdAt: now(), updatedAt: now() });
+      });
+    this.data.contentBlocks
+      .filter((block) => lessonIdMap.has(block.lessonId))
+      .forEach((block) => this.data.contentBlocks.push({ ...block, id: id("block"), lessonId: lessonIdMap.get(block.lessonId)!, createdAt: now(), updatedAt: now() }));
+    const objectives = this.data.learningObjectives.filter((objective) => objective.courseVersionId === sourceVersionId);
+    const objectiveMap = new Map<string, string>();
+    objectives.forEach((objective) => {
+      const objectiveId = id("obj");
+      objectiveMap.set(objective.id, objectiveId);
+      this.data.learningObjectives.push({ ...objective, id: objectiveId, courseVersionId: targetVersionId, createdAt: now(), updatedAt: now() });
+    });
+    const sourceAssessment = this.data.assessments.find((assessment) => assessment.courseVersionId === sourceVersionId);
+    if (sourceAssessment) {
+      const assessmentId = id("assess");
+      this.data.assessments.push({ ...sourceAssessment, id: assessmentId, courseVersionId: targetVersionId, createdAt: now(), updatedAt: now() });
+      this.data.assessmentQuestions
+        .filter((link) => link.assessmentId === sourceAssessment.id)
+        .forEach((link) => this.data.assessmentQuestions.push({ ...link, id: id("aq"), assessmentId, createdAt: now(), updatedAt: now() }));
+    }
+  }
+
+  private resolveAudienceLearners(audiences: Array<Pick<AssignmentAudience, "audienceType" | "audienceId">>) {
+    const userIds = new Set<string>();
+    const learnerRoleUsers = this.data.userRoles.filter((role) => role.role === "LEARNER").map((role) => role.userId);
+    audiences.forEach((audience) => {
+      if (audience.audienceType === "USER") userIds.add(audience.audienceId);
+      if (audience.audienceType === "TEAM") this.data.teamMembers.filter((member) => member.teamId === audience.audienceId).forEach((member) => userIds.add(member.userId));
+      if (audience.audienceType === "GROUP") this.data.groupMembers.filter((member) => member.groupId === audience.audienceId).forEach((member) => userIds.add(member.userId));
+      if (audience.audienceType === "ROLE") this.data.userRoles.filter((role) => role.role === audience.audienceId).forEach((role) => userIds.add(role.userId));
+    });
+    return [...userIds].filter((userId) => learnerRoleUsers.includes(userId) && this.data.users.find((user) => user.id === userId)?.status === "ACTIVE");
   }
 
   async invalidateEvidence(evidenceId: string, reason: string) {

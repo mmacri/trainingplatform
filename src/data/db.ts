@@ -3,23 +3,26 @@ import type { AppData, TableName } from "./schema";
 import { tableNames } from "./schema";
 import { createSeedData } from "./seed";
 
-export const schemaVersion = 1;
+export const schemaVersion = 2;
+
+const dexieStores = Object.fromEntries(
+  tableNames.map((table) => [
+    table,
+    table === "applicationSettings"
+      ? "id, key, updatedAt"
+      : "id, createdAt, updatedAt, userId, courseId, courseVersionId, organizationId, status"
+  ])
+);
 
 export class GridGuardDB extends Dexie {
   [key: string]: Table<Record<string, unknown>, string> | unknown;
 
   constructor() {
     super("GridGuardDB");
-    this.version(1).stores(
-      Object.fromEntries(
-        tableNames.map((table) => [
-          table,
-          table === "applicationSettings"
-            ? "id, key, updatedAt"
-            : "id, createdAt, updatedAt, userId, courseId, courseVersionId, organizationId, status"
-        ])
-      )
-    );
+    this.version(1).stores(dexieStores);
+    this.version(2).stores(dexieStores).upgrade(async (transaction) => {
+      await transaction.table("applicationSettings").put({ id: "setting_schema_version", key: "schemaVersion", value: 2, createdAt: now(), updatedAt: now() });
+    });
   }
 }
 
