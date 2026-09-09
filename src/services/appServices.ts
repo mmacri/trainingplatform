@@ -16,6 +16,7 @@ import type {
   CourseStatus,
   CourseVersion,
   Enrollment,
+  LearningCampaign,
   LearningObjective,
   Lesson,
   Module,
@@ -52,6 +53,29 @@ export interface Session {
   organizationId: string;
   loginAt: string;
   lastActivityAt: string;
+}
+
+export interface LearningRecommendation {
+  id: string;
+  userId: string;
+  recommendationType: "CONTINUE_COURSE" | "REVIEW_LESSON" | "PRACTICE_ACTIVITY" | "SCENARIO" | "START_COURSE" | "REFRESHER" | "LEARNING_PATH" | "FOLLOW_UP";
+  targetId: string;
+  reasonCode: "DUE_SOON" | "OVERDUE" | "LOW_TOPIC_SCORE" | "WEAK_SKILL" | "IN_PROGRESS" | "RELATED_SKILL" | "CERT_EXPIRING" | "REINFORCEMENT_DUE" | "MANAGER_ASSIGNED" | "LEARNING_PATH_NEXT" | "SELF_SELECTED";
+  reason: string;
+  priority: number;
+  createdAt: string;
+  required?: boolean;
+  href: string;
+  title: string;
+}
+
+export interface SkillMastery {
+  skillId: string;
+  title: string;
+  category: string;
+  state: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG";
+  evidenceCount: number;
+  recommendedActivityId?: string;
 }
 
 const sessionKey = "gridguard.session";
@@ -278,6 +302,126 @@ function latestCourseReview(data: AppData, courseId: string) {
   return data.reviews
     .filter((review) => versionIds.includes(review.courseVersionId))
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())[0];
+}
+
+export class LearningRecommendationService {
+  static getRecommendations(data: AppData, userId: string): LearningRecommendation[] {
+    const recommendations: LearningRecommendation[] = [];
+    const dismissed = new Set(
+      data.learningPreferences
+        .filter((item) => item.userId === userId && item.key === "dismissedRecommendation")
+        .map((item) => String(item.value))
+    );
+    const datedAssignments = data.enrollments
+      .filter((enrollment) => enrollment.userId === userId)
+      .map((enrollment) => ({
+        enrollment,
+        course: data.courses.find((course) => course.id === enrollment.courseId),
+        assignment: data.assignments.find((assignment) => assignment.id === enrollment.assignmentId)
+      }))
+      .filter((item) => item.course);
+
+    datedAssignments.forEach(({ enrollment, course, assignment }) => {
+      if (!course) return;
+      const state = getCourseCompletionState(data, userId, course.id);
+      const dueAt = assignment?.dueAt ? new Date(assignment.dueAt).getTime() : undefined;
+      const daysDue = dueAt ? Math.ceil((dueAt - Date.now()) / 86400000) : undefined;
+      const overdue = dueAt ? dueAt < Date.now() && enrollment.status !== "COMPLETED" : false;
+      if (overdue) {
+        recommendations.push(rec(userId, "START_COURSE", course.id, "OVERDUE", `Overdue required training`, 1000, state.resumeDestination, course.title, true));
+      } else if (daysDue !== undefined && daysDue <= 14 && enrollment.status !== "COMPLETED") {
+        recommendations.push(rec(userId, "START_COURSE", course.id, "DUE_SOON", `Due in ${Math.max(daysDue, 0)} days`, 900, state.resumeDestination, course.title, true));
+      } else if (state.percent > 0 && state.percent < 100) {
+        recommendations.push(rec(userId, "CONTINUE_COURSE", course.id, "IN_PROGRESS", "Continue where you left off", 800, state.resumeDestination, course.title, true));
+      }
+    });
+
+    const failed = data.assessmentAttempts.filter((attempt) => attempt.userId === userId && !attempt.passed).at(-1);
+    if (failed?.missedTopics?.length) {
+      const skill = findSkillForTopic(data, failed.missedTopics[0]);
+      const activity = skill ? data.practiceActivities.find((item) => item.status === "PUBLISHED" && item.skillIds.includes(skill.id)) : data.practiceActivities.find((item) => item.status === "PUBLISHED");
+      if (activity) recommendations.push(rec(userId, "PRACTICE_ACTIVITY", activity.id, "LOW_TOPIC_SCORE", `Recommended after your recent assessment`, 760, `/practice/${activity.id}`, activity.title));
+    }
+
+    data.reinforcementSchedules
+      .filter((schedule) => schedule.userId === userId)
+      .flatMap((schedule) => schedule.events)
+      .filter((event) => event.state === "AVAILABLE" && !dismissed.has(event.id))
+      .forEach((event) => {
+        const activity = data.practiceActivities.find((item) => item.id === event.activityId);
+        const scenario = data.scenarioDefinitions.find((item) => item.id === event.activityId);
+        recommendations.push(rec(userId, activity ? "REFRESHER" : "SCENARIO", event.activityId, "REINFORCEMENT_DUE", "Quick reinforcement from completed training", 650, activity ? `/practice/${activity.id}` : `/scenarios/${scenario?.id}`, activity?.title ?? scenario?.title ?? "Reinforcement"));
+      });
+
+    SkillMasteryService.getSkillMastery(data, userId)
+      .filter((skill) => skill.state !== "STRONG" && skill.recommendedActivityId && !dismissed.has(`skill-${skill.skillId}`))
+      .forEach((skill) => {
+        const activity = data.practiceActivities.find((item) => item.id === skill.recommendedActivityId);
+        if (activity) recommendations.push(rec(userId, "PRACTICE_ACTIVITY", activity.id, "WEAK_SKILL", `Strengthen ${skill.title}`, 500, `/practice/${activity.id}`, activity.title));
+      });
+
+    if (!recommendations.length) {
+      const activity = data.practiceActivities.find((item) => item.status === "PUBLISHED");
+      if (activity) recommendations.push(rec(userId, "PRACTICE_ACTIVITY", activity.id, "SELF_SELECTED", "You are caught up. Keep skills fresh with a short challenge.", 100, `/practice/${activity.id}`, activity.title));
+    }
+
+    const seen = new Set<string>();
+    return recommendations
+      .filter((item) => {
+        const key = `${item.recommendationType}-${item.targetId}`;
+        if (seen.has(key)) return false;
+        seen.add(key);
+        return item.required || !dismissed.has(item.id);
+      })
+      .sort((left, right) => right.priority - left.priority);
+  }
+}
+
+function rec(userId: string, recommendationType: LearningRecommendation["recommendationType"], targetId: string, reasonCode: LearningRecommendation["reasonCode"], reason: string, priority: number, href: string, title: string, required = false): LearningRecommendation {
+  return { id: `recommendation-${userId}-${recommendationType}-${targetId}`, userId, recommendationType, targetId, reasonCode, reason, priority, createdAt: now(), href, title, required };
+}
+
+function findSkillForTopic(data: AppData, topic: string) {
+  const normalized = topic.toLowerCase();
+  return data.skills.find((skill) => normalized.includes(skill.name.toLowerCase().split(" ")[0]) || skill.name.toLowerCase().includes(normalized));
+}
+
+export class SkillMasteryService {
+  static getSkillMastery(data: AppData, userId: string): SkillMastery[] {
+    return data.skills.map((skill) => {
+      const evidence = data.skillEvidence.filter((item) => item.userId === userId && item.skillId === skill.id);
+      const weighted = evidence.reduce((sum, item) => sum + scoreForResult(item.result) * item.weight, 0);
+      const weight = evidence.reduce((sum, item) => sum + item.weight, 0);
+      const average = weight ? weighted / weight : 0;
+      const state: SkillMastery["state"] = average >= 80 ? "STRONG" : average >= 60 ? "DEVELOPING" : "NEEDS_REVIEW";
+      const activity = data.practiceActivities.find((item) => item.status === "PUBLISHED" && item.skillIds.includes(skill.id));
+      return { skillId: skill.id, title: skill.name, category: skill.category ?? "Skills", state, evidenceCount: evidence.length, recommendedActivityId: activity?.id };
+    });
+  }
+}
+
+function scoreForResult(result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG") {
+  if (result === "STRONG") return 100;
+  if (result === "DEVELOPING") return 70;
+  return 40;
+}
+
+export function getCoachingOpportunities(data: AppData, managerId: string) {
+  const teamIds = data.teams.filter((team) => canViewTeam(data, managerId, team.id)).map((team) => team.id);
+  const memberIds = data.teamMembers.filter((member) => teamIds.includes(member.teamId)).map((member) => member.userId);
+  return memberIds.flatMap((userId) =>
+    SkillMasteryService.getSkillMastery(data, userId)
+      .filter((skill) => skill.state !== "STRONG")
+      .slice(0, 2)
+      .map((skill) => ({
+        userId,
+        skillId: skill.skillId,
+        reason: skill.state === "NEEDS_REVIEW" ? "REPEATED_LOW_SCORE" : "SCENARIO_PATTERN",
+        recommendedAction: "ASSIGN_PRACTICE" as const,
+        priority: skill.state === "NEEDS_REVIEW" ? "HIGH" as const : "MEDIUM" as const,
+        activityId: skill.recommendedActivityId
+      }))
+  );
 }
 
 export class AuthService {
@@ -1137,6 +1281,145 @@ export class WorkflowService {
     await this.persist();
   }
 
+  async completePracticeActivity(activityId: string, responses: Record<string, unknown>, source: "SELF_SELECTED" | "RECOMMENDED" | "ASSIGNED" | "REMEDIATION" | "REINFORCEMENT" = "SELF_SELECTED") {
+    const activity = this.data.practiceActivities.find((item) => item.id === activityId);
+    if (!activity) throw new Error("Practice activity not found.");
+    const scoredBlocks = activity.blocks.filter((block) => block.type === "decision_cards" || block.type === "quick_recall");
+    const correct = scoredBlocks.filter((block) => {
+      const answer = responses[block.id];
+      const data = block.data as { correct?: number } | undefined;
+      return Number(answer) === Number(data?.correct ?? 0);
+    }).length;
+    const score = scoredBlocks.length ? Math.round((correct / scoredBlocks.length) * 100) : 100;
+    const result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG" = score >= 80 ? "STRONG" : score >= 60 ? "DEVELOPING" : "NEEDS_REVIEW";
+    const attempt = {
+      id: id("practiceattempt"),
+      practiceActivityId: activity.id,
+      userId: this.actorId,
+      startedAt: now(),
+      completedAt: now(),
+      score,
+      passed: activity.scoringMode === "PRACTICE" ? true : score >= (activity.passingScore ?? 80),
+      responses: Object.entries(responses).map(([blockId, response]) => ({ blockId, response, correct: true })),
+      topicResults: activity.topicIds.map((topicId) => ({ topicId, result, score })),
+      durationSeconds: activity.estimatedMinutes * 60,
+      source,
+      createdAt: now(),
+      updatedAt: now()
+    };
+    this.data.practiceAttempts.push(attempt);
+    activity.skillIds.forEach((skillId) => {
+      this.data.skillEvidence.push({ id: id("skillevidence"), userId: this.actorId, skillId, sourceType: activity.activityType === "MICROLEARNING" ? "MICROLEARNING" : "PRACTICE", sourceId: attempt.id, observedAt: now(), result, weight: activity.scoringMode === "COMPETENCY" ? 2 : 1, details: activity.title, createdAt: now(), updatedAt: now() });
+    });
+    this.data.reinforcementSchedules.forEach((schedule) => schedule.events.forEach((event) => {
+      if (event.activityId === activityId && event.state === "AVAILABLE") {
+        event.state = "COMPLETED";
+        event.completedAt = now();
+      }
+    }));
+    audit(this.data, this.actorId, "PRACTICE_COMPLETED", "PracticeActivity", activity.id, `Completed ${activity.title} with ${result.toLowerCase().replaceAll("_", " ")} result.`);
+    await this.persist();
+    return attempt;
+  }
+
+  async dismissRecommendation(recommendationId: string) {
+    this.data.learningPreferences.push({ id: id("pref"), userId: this.actorId, key: "dismissedRecommendation", value: recommendationId, createdAt: now(), updatedAt: now() });
+    await this.persist();
+  }
+
+  async startBranchingScenario(scenarioId: string, replayOfAttemptId?: string) {
+    const scenario = this.data.scenarioDefinitions.find((item) => item.id === scenarioId);
+    if (!scenario) throw new Error("Scenario not found.");
+    const attempt = {
+      id: id("branchattempt"),
+      userId: this.actorId,
+      scenarioId,
+      startedAt: now(),
+      currentStepId: scenario.steps[0]?.id ?? "complete",
+      currentState: { ...scenario.initialState },
+      decisions: [],
+      skillResults: [],
+      overallResult: "DEVELOPING" as const,
+      replayOfAttemptId,
+      createdAt: now(),
+      updatedAt: now()
+    };
+    this.data.branchingScenarioAttempts.push(attempt);
+    audit(this.data, this.actorId, replayOfAttemptId ? "SCENARIO_REPLAY_STARTED" : "SCENARIO_STARTED", "Scenario", scenarioId, `Started ${scenario.title}.`);
+    await this.persist();
+    return attempt;
+  }
+
+  async chooseScenarioChoice(attemptId: string, stepId: string, choiceId: string) {
+    const attempt = this.data.branchingScenarioAttempts.find((item) => item.id === attemptId);
+    if (!attempt) throw new Error("Scenario attempt not found.");
+    const scenario = this.data.scenarioDefinitions.find((item) => item.id === attempt.scenarioId);
+    const step = scenario?.steps.find((item) => item.id === stepId);
+    const choice = step?.choices?.find((item) => item.id === choiceId);
+    if (!scenario || !step || !choice) throw new Error("Scenario choice not found.");
+    choice.impact.forEach((impact) => { attempt.currentState[impact.field] = impact.value; });
+    attempt.decisions.push({ stepId, choiceId, quality: choice.quality, feedback: choice.feedback, selectedAt: now() });
+    const nextStep = choice.nextStepId ? scenario.steps.find((item) => item.id === choice.nextStepId) : undefined;
+    if (nextStep) {
+      attempt.currentStepId = nextStep.id;
+    } else {
+      const recommended = attempt.decisions.filter((decision) => decision.quality === "RECOMMENDED").length;
+      attempt.overallResult = recommended >= 3 ? "STRONG" : recommended >= 1 ? "DEVELOPING" : "NEEDS_REVIEW";
+      attempt.completedAt = now();
+      attempt.skillResults = scenario.skillIds.map((skillId) => ({ topicId: skillId, result: attempt.overallResult, score: scoreForResult(attempt.overallResult) }));
+      scenario.skillIds.forEach((skillId) => {
+        this.data.skillEvidence.push({ id: id("skillevidence"), userId: this.actorId, skillId, sourceType: "SCENARIO", sourceId: attempt.id, observedAt: now(), result: attempt.overallResult, weight: 3, details: scenario.title, createdAt: now(), updatedAt: now() });
+      });
+      audit(this.data, this.actorId, "SCENARIO_COMPLETED", "Scenario", scenario.id, `Completed ${scenario.title} with ${attempt.overallResult.toLowerCase().replaceAll("_", " ")} result.`);
+    }
+    attempt.updatedAt = now();
+    await this.persist();
+    return attempt;
+  }
+
+  async createLearnerFollowUp(input: { title: string; description?: string; sourceType: "COURSE" | "SCENARIO" | "PRACTICE" | "MANUAL"; sourceId?: string; dueAt?: string; visibility?: "PRIVATE" | "SHARED_WITH_MANAGER" }) {
+    const followUp = { id: id("followup"), userId: this.actorId, title: input.title, description: input.description, sourceType: input.sourceType, sourceId: input.sourceId, dueAt: input.dueAt, visibility: input.visibility ?? ("PRIVATE" as const), createdAt: now(), updatedAt: now() };
+    this.data.learnerFollowUps.push(followUp);
+    await this.persist();
+    return followUp;
+  }
+
+  async updateFollowUp(followUpId: string, updates: { title?: string; description?: string; completed?: boolean; visibility?: "PRIVATE" | "SHARED_WITH_MANAGER" }) {
+    const followUp = this.data.learnerFollowUps.find((item) => item.id === followUpId && item.userId === this.actorId);
+    if (!followUp) throw new Error("Follow-up not found.");
+    if (updates.title !== undefined) followUp.title = updates.title;
+    if (updates.description !== undefined) followUp.description = updates.description;
+    if (updates.visibility) followUp.visibility = updates.visibility;
+    if (updates.completed !== undefined) followUp.completedAt = updates.completed ? now() : undefined;
+    followUp.updatedAt = now();
+    await this.persist();
+  }
+
+  async assignLearningItem(targetType: "PRACTICE" | "SCENARIO", targetId: string, audiences: Array<Pick<AssignmentAudience, "audienceType" | "audienceId">>, dueAt: string, message?: string) {
+    const target = targetType === "PRACTICE" ? this.data.practiceActivities.find((item) => item.id === targetId) : this.data.scenarioDefinitions.find((item) => item.id === targetId);
+    if (!target) throw new Error("Learning item not found.");
+    const assignment: Assignment = { id: id("assign"), organizationId: this.data.organizations[0].id, title: `Assigned ${target.title}`, targetType, targetId, createdById: this.actorId, dueAt, assignedAt: now(), recurrence: "NONE", status: "ACTIVE", notificationSettings: { notifyLearners: true }, createdAt: now(), updatedAt: now() };
+    this.data.assignments.push(assignment);
+    audiences.forEach((audience) => this.data.assignmentAudiences.push({ id: id("aud"), assignmentId: assignment.id, ...audience, createdAt: now(), updatedAt: now() }));
+    this.resolveAudienceLearners(audiences).forEach((userId) => notify(this.data, userId, `${targetType}_ASSIGNED`, `${targetType === "PRACTICE" ? "Practice" : "Scenario"} assigned`, message || `${target.title} was assigned to you.`, targetType === "PRACTICE" ? `/practice/${targetId}` : `/scenarios/${targetId}`));
+    audit(this.data, this.actorId, `${targetType}_ASSIGNED`, targetType, targetId, `Assigned ${target.title}.`);
+    await this.persist();
+    return assignment;
+  }
+
+  async createCampaign(input: { title: string; description: string; audienceType: LearningCampaign["audienceType"]; audienceIds: string[]; dueAt?: string; items: LearningCampaign["items"] }) {
+    const campaign: LearningCampaign = { id: id("campaign"), title: input.title, description: input.description, status: "ACTIVE", audienceType: input.audienceType, audienceIds: input.audienceIds, startAt: now(), dueAt: input.dueAt, items: input.items, createdByUserId: this.actorId, createdAt: now(), updatedAt: now() };
+    this.data.learningCampaigns.push(campaign);
+    const audiences = input.audienceIds.map((audienceId) => ({ audienceType: input.audienceType, audienceId }));
+    const assignment: Assignment = { id: id("assign"), organizationId: this.data.organizations[0].id, title: campaign.title, targetType: "CAMPAIGN", targetId: campaign.id, createdById: this.actorId, dueAt: input.dueAt ?? addDays(new Date(), 30).toISOString(), assignedAt: now(), recurrence: "NONE", status: "ACTIVE", notificationSettings: { notifyLearners: true }, createdAt: now(), updatedAt: now() };
+    this.data.assignments.push(assignment);
+    audiences.forEach((audience) => this.data.assignmentAudiences.push({ id: id("aud"), assignmentId: assignment.id, ...audience, createdAt: now(), updatedAt: now() }));
+    this.resolveAudienceLearners(audiences).forEach((userId) => notify(this.data, userId, "CAMPAIGN_DUE", "Learning campaign assigned", `${campaign.title} is available.`, `/campaigns/${campaign.id}`));
+    audit(this.data, this.actorId, "CAMPAIGN_CREATED", "LearningCampaign", campaign.id, `Created ${campaign.title}.`);
+    await this.persist();
+    return campaign;
+  }
+
   private ensureEnrollment(courseId: string): Enrollment {
     let enrollment = this.data.enrollments.find((item) => item.userId === this.actorId && item.courseId === courseId);
     if (!enrollment) {
@@ -1397,13 +1680,30 @@ function certificateIdFor(user: User, course: Course) {
 }
 
 export function searchAuthorized(data: AppData, userId: string, query: string) {
+  const visibleCourseIds = new Set(data.courses.filter((course) => canAccessCourse(data, userId, course.id).allowed || canAccessCourse(data, userId, course.id).discoverable).map((course) => course.id));
+  const visibleVersionIds = new Set(data.courses.filter((course) => visibleCourseIds.has(course.id)).map((course) => course.currentVersionId).filter(Boolean));
   const items = [
     ...data.courses
-      .filter((course) => canAccessCourse(data, userId, course.id).allowed || canAccessCourse(data, userId, course.id).discoverable)
+      .filter((course) => visibleCourseIds.has(course.id))
       .map((course) => ({ type: "Course", title: course.title, description: course.shortDescription, href: `/courses/${course.id}` })),
+    ...data.lessons
+      .filter((lesson) => visibleVersionIds.has(lesson.courseVersionId))
+      .map((lesson) => {
+        const course = data.courses.find((item) => item.currentVersionId === lesson.courseVersionId);
+        const body = data.contentBlocks.filter((block) => block.lessonId === lesson.id).map((block) => `${block.title ?? ""} ${block.body ?? ""}`).join(" ");
+        return { type: "Lesson", title: lesson.title, description: `${course?.shortTitle ?? course?.title ?? "Course"} · ${body.slice(0, 160)}`, href: course ? `/learn/${course.id}/${lesson.id}` : "/learning" };
+      }),
+    ...data.practiceActivities
+      .filter((activity) => activity.status === "PUBLISHED")
+      .map((activity) => ({ type: "Practice", title: activity.title, description: activity.description, href: `/practice/${activity.id}` })),
+    ...data.scenarioDefinitions
+      .map((scenario) => ({ type: "Scenario", title: scenario.title, description: scenario.description, href: `/scenarios/${scenario.id}` })),
+    ...data.courseResources
+      .filter((resource) => visibleCourseIds.has(resource.courseId))
+      .map((resource) => ({ type: "Resource", title: resource.title, description: resource.description, href: `/resources/${resource.id}` })),
     ...data.learningPaths.map((path) => ({ type: "Learning Path", title: path.title, description: path.description, href: "/learning-paths" })),
     ...data.standards.map((standard) => ({ type: "Standard", title: `${standard.number} ${standard.title}`, description: standard.internalNotes, href: "/standards" })),
-    ...data.skills.map((skill) => ({ type: "Skill", title: skill.name, description: skill.description, href: "/skills" })),
+    ...data.skills.map((skill) => ({ type: "Skill", title: skill.name, description: skill.description, href: `/skills/${skill.id}` })),
     ...data.certifications.map((cert) => ({ type: "Certification", title: cert.name, description: cert.description, href: "/certifications" }))
   ];
   if (!query.trim()) return items.slice(0, 8);

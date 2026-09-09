@@ -209,6 +209,9 @@ export interface Skill extends BaseRecord {
   name: string;
   description: string;
   level: string;
+  category?: string;
+  relatedStandardIds?: string[];
+  relatedCourseIds?: string[];
 }
 
 export interface CourseSkill extends BaseRecord {
@@ -286,7 +289,7 @@ export interface LearningPathEnrollment extends BaseRecord {
 export interface Assignment extends BaseRecord {
   organizationId: string;
   title: string;
-  targetType: "COURSE" | "LEARNING_PATH" | "CERTIFICATION";
+  targetType: "COURSE" | "LEARNING_PATH" | "CERTIFICATION" | "PRACTICE" | "SCENARIO" | "CAMPAIGN";
   targetId: string;
   createdById: string;
   dueAt: string;
@@ -564,6 +567,183 @@ export interface ActivityTimeline extends BaseRecord {
   summary: string;
 }
 
+export interface PracticeActivity extends BaseRecord {
+  title: string;
+  subtitle?: string;
+  description: string;
+  activityType: "QUICK_CHALLENGE" | "KNOWLEDGE_REFRESH" | "EVIDENCE_CHALLENGE" | "DECISION_EXERCISE" | "CLASSIFICATION" | "SEQUENCE" | "SYSTEM_INSPECTION" | "NETWORK_INSPECTION" | "TIMELINE_REVIEW" | "MICROLEARNING";
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  estimatedMinutes: number;
+  difficulty: "FOUNDATIONAL" | "INTERMEDIATE" | "ADVANCED";
+  standardIds: string[];
+  skillIds: string[];
+  topicIds: string[];
+  relatedCourseIds: string[];
+  relatedLessonIds: string[];
+  blocks: Array<Pick<ContentBlock, "id" | "type" | "title" | "body" | "data" | "required" | "position">>;
+  scoringMode: "PRACTICE" | "SCORE" | "COMPETENCY";
+  passingScore?: number;
+  repeatable: boolean;
+  recommendationWeight?: number;
+}
+
+export interface PracticeAttempt extends BaseRecord {
+  practiceActivityId: string;
+  userId: string;
+  startedAt: string;
+  completedAt?: string;
+  score?: number;
+  passed?: boolean;
+  responses: Array<{ blockId: string; response: unknown; correct?: boolean }>;
+  topicResults: Array<{ topicId: string; result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG"; score?: number }>;
+  durationSeconds?: number;
+  source: "SELF_SELECTED" | "RECOMMENDED" | "ASSIGNED" | "REMEDIATION" | "REINFORCEMENT";
+}
+
+export interface SkillEvidence extends BaseRecord {
+  userId: string;
+  skillId: string;
+  sourceType: "COURSE_ASSESSMENT" | "KNOWLEDGE_CHECK" | "SCENARIO" | "PRACTICE" | "MICROLEARNING";
+  sourceId: string;
+  observedAt: string;
+  result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG";
+  weight: number;
+  details?: string;
+}
+
+export interface LearnerFollowUp extends BaseRecord {
+  userId: string;
+  title: string;
+  description?: string;
+  sourceType: "COURSE" | "SCENARIO" | "PRACTICE" | "MANUAL";
+  sourceId?: string;
+  dueAt?: string;
+  completedAt?: string;
+  visibility: "PRIVATE" | "SHARED_WITH_MANAGER";
+}
+
+export interface ReinforcementSchedule extends BaseRecord {
+  userId: string;
+  sourceCourseId: string;
+  sourceCourseVersionId: string;
+  skillIds: string[];
+  topicIds: string[];
+  events: ReinforcementEvent[];
+}
+
+export interface ReinforcementEvent {
+  id: string;
+  dueAt: string;
+  type: "QUICK_RECALL" | "PRACTICE" | "SCENARIO" | "MICROLEARNING";
+  activityId: string;
+  state: "SCHEDULED" | "AVAILABLE" | "COMPLETED" | "SKIPPED";
+  completedAt?: string;
+}
+
+export interface ScenarioDefinition extends BaseRecord {
+  title: string;
+  description: string;
+  category: string;
+  difficulty: "FOUNDATIONAL" | "INTERMEDIATE" | "ADVANCED";
+  estimatedMinutes: number;
+  relatedCourseIds: string[];
+  skillIds: string[];
+  topicIds: string[];
+  initialState: Record<string, unknown>;
+  steps: ScenarioStepDefinition[];
+  resultRules: Array<{ id: string; result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG"; minRecommendedChoices: number }>;
+  repeatable: boolean;
+  variantPool?: Array<Record<string, string>>;
+}
+
+export interface ScenarioStepDefinition {
+  id: string;
+  stepType: "INFORMATION" | "DECISION" | "INSPECTION" | "TIMELINE" | "CLASSIFICATION" | "REVEAL";
+  title?: string;
+  narrative: string;
+  workspaceConfig?: Record<string, unknown>;
+  choices?: ScenarioChoice[];
+  visibleWhen?: Array<{ field: string; equals: unknown }>;
+  stateChanges?: Array<{ field: string; value: unknown }>;
+  skillMappings?: Array<{ skillId: string; principle: string }>;
+}
+
+export interface ScenarioChoice {
+  id: string;
+  label: string;
+  description?: string;
+  feedback: string;
+  principleTags: string[];
+  impact: Array<{ field: string; value: unknown }>;
+  nextStepId?: string;
+  quality: "RECOMMENDED" | "ACCEPTABLE" | "RISKY" | "INCORRECT";
+}
+
+export interface BranchingScenarioAttempt extends BaseRecord {
+  userId: string;
+  scenarioId: string;
+  startedAt: string;
+  completedAt?: string;
+  currentStepId: string;
+  currentState: Record<string, unknown>;
+  decisions: Array<{ stepId: string; choiceId: string; quality: string; feedback: string; selectedAt: string }>;
+  skillResults: Array<{ topicId: string; result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG"; score?: number }>;
+  overallResult: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG";
+  replayOfAttemptId?: string;
+}
+
+export interface LearningCampaign extends BaseRecord {
+  title: string;
+  description: string;
+  status: "DRAFT" | "ACTIVE" | "COMPLETED" | "ARCHIVED";
+  audienceType: "USER" | "TEAM" | "GROUP" | "ROLE";
+  audienceIds: string[];
+  startAt: string;
+  dueAt?: string;
+  items: LearningCampaignItem[];
+  createdByUserId: string;
+}
+
+export interface LearningCampaignItem {
+  id: string;
+  order: number;
+  itemType: "COURSE" | "PRACTICE" | "SCENARIO" | "ACKNOWLEDGEMENT" | "LIVE_SESSION";
+  targetId: string;
+  required: boolean;
+}
+
+export interface LiveLearningSession extends BaseRecord {
+  title: string;
+  description: string;
+  sessionType: "INSTRUCTOR_LED" | "TABLETOP";
+  facilitatorUserId: string;
+  scheduledAt: string;
+  durationMinutes: number;
+  participantUserIds: string[];
+  scenarioId?: string;
+  status: "SCHEDULED" | "IN_PROGRESS" | "COMPLETED";
+  attendance: Array<{ userId: string; attended: boolean; recordedAt?: string }>;
+  notes?: string;
+  outcome?: string;
+}
+
+export interface ContentFeedback extends BaseRecord {
+  courseId?: string;
+  courseVersionId?: string;
+  lessonId?: string;
+  activityId?: string;
+  userId: string;
+  feedbackType: "HELPFUL" | "CONFUSING" | "OUTDATED" | "BROKEN_ACTIVITY";
+  comment?: string;
+  status: "OPEN" | "REVIEWED";
+}
+
+export interface LearningPreference extends BaseRecord {
+  userId: string;
+  key: string;
+  value: unknown;
+}
+
 export interface StandardChangeReview extends BaseRecord {
   standardId: string;
   oldVersion: string;
@@ -636,6 +816,17 @@ export interface AppData {
   backupMetadata: BackupMetadata[];
   activityTimeline: ActivityTimeline[];
   standardChangeReviews: StandardChangeReview[];
+  practiceActivities: PracticeActivity[];
+  practiceAttempts: PracticeAttempt[];
+  skillEvidence: SkillEvidence[];
+  learnerFollowUps: LearnerFollowUp[];
+  reinforcementSchedules: ReinforcementSchedule[];
+  scenarioDefinitions: ScenarioDefinition[];
+  branchingScenarioAttempts: BranchingScenarioAttempt[];
+  learningCampaigns: LearningCampaign[];
+  liveLearningSessions: LiveLearningSession[];
+  contentFeedbackItems: ContentFeedback[];
+  learningPreferences: LearningPreference[];
 }
 
 export const tableNames = [
@@ -697,7 +888,18 @@ export const tableNames = [
   "applicationSettings",
   "backupMetadata",
   "activityTimeline",
-  "standardChangeReviews"
+  "standardChangeReviews",
+  "practiceActivities",
+  "practiceAttempts",
+  "skillEvidence",
+  "learnerFollowUps",
+  "reinforcementSchedules",
+  "scenarioDefinitions",
+  "branchingScenarioAttempts",
+  "learningCampaigns",
+  "liveLearningSessions",
+  "contentFeedbackItems",
+  "learningPreferences"
 ] as const;
 
 export type TableName = (typeof tableNames)[number];

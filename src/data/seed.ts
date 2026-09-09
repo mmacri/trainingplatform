@@ -2,6 +2,7 @@ import { addDays, addMonths, subDays } from "date-fns";
 import type { AppData, Course, CourseStatus, QuestionType, Role } from "./schema";
 import { addFlagshipCip004Course } from "./flagshipCip004";
 import { addRebuiltCatalogCourses } from "./catalogCourseSeeds";
+import { addLearningIntelligenceSeed } from "./learningIntelligenceSeed";
 
 const password = "GridGuard-Local-2026!";
 
@@ -85,7 +86,18 @@ function emptyData(): AppData {
     applicationSettings: [],
     backupMetadata: [],
     activityTimeline: [],
-    standardChangeReviews: []
+    standardChangeReviews: [],
+    practiceActivities: [],
+    practiceAttempts: [],
+    skillEvidence: [],
+    learnerFollowUps: [],
+    reinforcementSchedules: [],
+    scenarioDefinitions: [],
+    branchingScenarioAttempts: [],
+    learningCampaigns: [],
+    liveLearningSessions: [],
+    contentFeedbackItems: [],
+    learningPreferences: []
   };
 }
 
@@ -556,6 +568,8 @@ export function createSeedData(): AppData {
       status: "IMPACT_REVIEW" as const
     })
   );
+
+  addLearningIntelligenceSeed(data);
 
   data.notifications.push(
     record("note", { userId: learner.id, type: "COURSE_ASSIGNED", title: "Training assigned", body: "CIP-004 Annual Refresher is due soon.", href: `/courses/${cip004.id}` }),

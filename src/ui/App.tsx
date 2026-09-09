@@ -36,6 +36,8 @@ import { createSeedData } from "../data/seed";
 import { getAllData, replaceAllData } from "../data/db";
 import {
   AuthService,
+  LearningRecommendationService,
+  SkillMasteryService,
   WorkflowService,
   canAccessCourse,
   canCreateCourses,
@@ -47,6 +49,7 @@ import {
   canViewEvidence,
   canViewTeam,
   getCourseCompletionState,
+  getCoachingOpportunities,
   getRoles,
   hasAnyRole,
   searchAuthorized
@@ -329,21 +332,38 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/" element={<Navigate to="/home" replace />} />
             <Route path="/home" element={<HomeDashboard />} />
             <Route path="/my-learning" element={<MyLearning />} />
+            <Route path="/practice" element={<PracticeCenter />} />
+            <Route path="/practice/:activityId" element={<PracticeActivityPage />} />
+            <Route path="/scenarios" element={<ScenarioLab />} />
+            <Route path="/scenarios/:scenarioId" element={<ScenarioDetail />} />
+            <Route path="/scenarios/:scenarioId/run/:attemptId" element={<ScenarioRun />} />
             <Route path="/learning" element={<LearningCatalog />} />
             <Route path="/library" element={<LibraryPage />} />
             <Route path="/learning-paths" element={<LearningPaths />} />
             <Route path="/certifications" element={<Certifications />} />
             <Route path="/skills" element={<SkillsPage />} />
+            <Route path="/skills/:skillId" element={<SkillDetailPage />} />
+            <Route path="/recommendations" element={<RecommendationsPage />} />
+            <Route path="/challenges/:activityId" element={<PracticeActivityPage />} />
+            <Route path="/refresher/:activityId" element={<PracticeActivityPage />} />
+            <Route path="/follow-ups" element={<FollowUpsPage />} />
+            <Route path="/learning-map" element={<LearningMapPage />} />
+            <Route path="/campaigns/:campaignId" element={<CampaignLearnerPage />} />
             <Route path="/courses/:courseId" element={<CourseLanding />} />
             <Route path="/learn/:courseId/:lessonId?" element={<CoursePlayer />} />
             <Route path="/resources/:resourceId" element={<ResourceDetail />} />
             <Route path="/records/:courseId" element={<TrainingRecord />} />
             <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
+            <Route path="/build/practice" element={<Guard allow={canManageCourses(data, user.id)} label="Practice Activities"><PracticeAuthoring /></Guard>} />
+            <Route path="/build/scenarios" element={<Guard allow={canManageCourses(data, user.id)} label="Scenario Builder"><ScenarioAuthoring /></Guard>} />
             <Route path="/build/new" element={<Guard allow={canCreateCourses(data, user.id)} label="Create Course"><CourseCreationWizard /></Guard>} />
             <Route path="/build/questions" element={<Guard allow={canManageCourses(data, user.id)} label="Question Bank"><QuestionBank /></Guard>} />
             <Route path="/build/courses/:courseId" element={<CourseWorkspace />} />
             <Route path="/build/courses/:courseId/assign" element={<Guard allow={canManageCourses(data, user.id)} label="Assign Training"><AssignmentWizard /></Guard>} />
             <Route path="/team" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Team Learning"><TeamDashboard /></Guard>} />
+            <Route path="/team/coaching" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Coaching"><ManagerCoaching /></Guard>} />
+            <Route path="/team/campaigns" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Campaigns"><ManagerCampaigns /></Guard>} />
+            <Route path="/team/challenges" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Challenges"><ManagerCoaching /></Guard>} />
             <Route path="/compliance" element={<Guard allow={canViewCompliance(data, user.id)} label="Compliance"><ComplianceDashboard /></Guard>} />
             <Route path="/standards" element={<Guard allow={canViewCompliance(data, user.id) || roles.includes("LEARNER")} label="Standards"><StandardsPage /></Guard>} />
             <Route path="/evidence" element={<Guard allow={canViewEvidence(data, user.id)} label="Evidence"><EvidencePage /></Guard>} />
@@ -368,15 +388,29 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
 }
 
 function buildNav(data: AppData, userId: string) {
-  const items = [
+  const learnerOnly = !hasAnyRole(data, userId, ["MANAGER", "AUTHOR", "COURSE_OWNER", "REVIEWER", "COMPLIANCE_MANAGER", "LEARNING_ADMIN", "PLATFORM_ADMIN"]);
+  const items = learnerOnly ? [
     { label: "Home", href: "/home", icon: Home },
     { label: "My Learning", href: "/my-learning", icon: GraduationCap },
+    { label: "Practice", href: "/practice", icon: ClipboardCheck },
+    { label: "Scenario Lab", href: "/scenarios", icon: ShieldCheck },
+    { label: "Skills", href: "/skills", icon: CheckCircle2 },
+    { label: "Learning Paths", href: "/learning-paths", icon: BookOpenCheck },
+    { label: "Certificates", href: "/certifications", icon: FileCheck2 }
+  ] : [
+    { label: "Home", href: "/home", icon: Home },
+    { label: "My Learning", href: "/my-learning", icon: GraduationCap },
+    { label: "Practice", href: "/practice", icon: ClipboardCheck },
+    { label: "Scenario Lab", href: "/scenarios", icon: ShieldCheck },
     { label: "Catalog", href: "/learning", icon: Library },
     { label: "Learning Paths", href: "/learning-paths", icon: BookOpenCheck },
     { label: "Certifications", href: "/certifications", icon: FileCheck2 },
     { label: "Skills", href: "/skills", icon: CheckCircle2 }
   ];
-  if (hasAnyRole(data, userId, ["MANAGER", "PLATFORM_ADMIN"])) items.push({ label: "Team Learning", href: "/team", icon: UsersRound });
+  if (hasAnyRole(data, userId, ["MANAGER", "PLATFORM_ADMIN"])) {
+    items.push({ label: "Team Learning", href: "/team", icon: UsersRound });
+    items.push({ label: "Coaching", href: "/team/coaching", icon: ClipboardCheck });
+  }
   if (canManageCourses(data, userId)) items.push({ label: "Course Management", href: "/build", icon: ClipboardCheck });
   if (canViewCompliance(data, userId)) {
     items.push({ label: "Compliance", href: "/compliance", icon: ShieldCheck });
@@ -443,6 +477,10 @@ function PageHeader({ title, subtitle, action }: { title: string; subtitle?: str
   );
 }
 
+function titleize(value: string) {
+  return value.replaceAll("_", " ").replace(/([a-z])([A-Z])/g, "$1 $2").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
 function HomeDashboard() {
   const { data, user } = useApp();
   const enrollments = data.enrollments.filter((item) => item.userId === user.id);
@@ -451,10 +489,21 @@ function HomeDashboard() {
   const inProgress = enrollments.filter((item) => item.status === "IN_PROGRESS").length;
   const certs = data.userCertifications.filter((item) => item.userId === user.id).length;
   const required = enrollments.map((enrollment) => data.courses.find((course) => course.id === enrollment.courseId)!).filter(Boolean);
+  const recommendations = LearningRecommendationService.getRecommendations(data, user.id);
+  const next = recommendations[0];
+  const practice = recommendations.find((item) => item.recommendationType === "PRACTICE_ACTIVITY" || item.recommendationType === "REFRESHER");
+  const fresh = recommendations.find((item) => item.reasonCode === "REINFORCEMENT_DUE");
+  const mastery = SkillMasteryService.getSkillMastery(data, user.id).filter((skill) => skill.evidenceCount).slice(0, 4);
+  const dueSoon = enrollments
+    .map((enrollment) => ({ enrollment, assignment: data.assignments.find((assignment) => assignment.id === enrollment.assignmentId), course: data.courses.find((course) => course.id === enrollment.courseId) }))
+    .filter((item) => item.assignment && item.course && item.enrollment.status !== "COMPLETED")
+    .sort((left, right) => new Date(left.assignment!.dueAt).getTime() - new Date(right.assignment!.dueAt).getTime())
+    .slice(0, 3);
 
   return (
     <>
-      <PageHeader title={`Good afternoon, ${user.firstName}`} subtitle="Here's what needs your attention." />
+      <PageHeader title={`Good afternoon, ${user.firstName}`} subtitle="Recommended next actions, practice, skills, and required learning." />
+      {next ? <Panel className="mb-5 border-cyan-200 bg-cyan-50/60 dark:border-cyan-900 dark:bg-cyan-950/40"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Recommended Next</p><div className="mt-2 flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-2xl font-semibold">{next.title}</h2><p className="mt-1 text-sm text-muted-foreground">{next.reason}</p></div><Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={next.href}>{next.recommendationType === "CONTINUE_COURSE" ? "Resume" : "Start"}</Link></div></Panel> : null}
       <div className="grid gap-4 md:grid-cols-4">
         <Stat label="Assigned Training" value={assigned} />
         <Stat label="In Progress" value={inProgress} />
@@ -462,22 +511,24 @@ function HomeDashboard() {
         <Stat label="Certifications" value={certs} />
       </div>
       <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_360px]">
+        <div className="space-y-5">
+        {dueSoon.length ? <Panel><h2 className="text-lg font-semibold">Due Soon</h2><div className="mt-3 space-y-2">{dueSoon.map(({ assignment, course }) => <Link key={assignment!.id} className="flex justify-between rounded-md border border-border p-3 text-sm" to={`/courses/${course!.id}`}><span>{course!.shortTitle ?? course!.title}</span><span className="text-muted-foreground">{new Date(assignment!.dueAt).toLocaleDateString()}</span></Link>)}</div></Panel> : null}
+        {fresh ? <Panel><p className="text-sm font-semibold text-cyan-700">Keep It Fresh</p><h2 className="mt-2 text-lg font-semibold">{fresh.title}</h2><p className="mt-1 text-sm text-muted-foreground">{fresh.reason}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={fresh.href}>Start Reinforcement</Link></Panel> : null}
+        {practice ? <Panel><p className="text-sm font-semibold text-cyan-700">Practice Recommendation</p><h2 className="mt-2 text-lg font-semibold">{practice.title}</h2><p className="mt-1 text-sm text-muted-foreground">{practice.reason}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={practice.href}>Start Challenge</Link></Panel> : null}
         <Panel>
-          <h2 className="text-lg font-semibold">Continue Learning</h2>
+          <h2 className="text-lg font-semibold">My Learning</h2>
           <div className="mt-3 space-y-3">
             {required.filter((course) => data.enrollments.some((enrollment) => enrollment.courseId === course.id && enrollment.status !== "COMPLETED")).map((course) => <CourseRow key={course.id} course={course} />)}
-            {required.length === 0 ? <EmptyState text="You're all caught up." action="Browse Catalog" href="/learning" /> : null}
+            {required.length === 0 ? <EmptyState text="You're caught up on required training." action="Explore Practice" href="/practice" /> : null}
           </div>
         </Panel>
+        </div>
         <div className="space-y-5">
           {hasAnyRole(data, user.id, ["MANAGER", "PLATFORM_ADMIN"]) ? <ManagerMini /> : null}
           {canViewCompliance(data, user.id) ? <ComplianceMini /> : null}
-          <Panel>
-            <h2 className="text-lg font-semibold">Upcoming Deadlines</h2>
-            <ul className="mt-3 space-y-2 text-sm">
-              {data.assignments.slice(0, 4).map((assignment) => <li key={assignment.id} className="flex justify-between gap-3"><span>{assignment.title}</span><span className="text-muted-foreground">{new Date(assignment.dueAt).toLocaleDateString()}</span></li>)}
-            </ul>
-          </Panel>
+          <Panel><h2 className="text-lg font-semibold">Learning Paths</h2><div className="mt-3 space-y-2">{data.learningPaths.slice(0, 3).map((path) => <Link key={path.id} className="block rounded-md border border-border p-3 text-sm" to="/learning-paths">{path.title}</Link>)}</div></Panel>
+          <Panel><h2 className="text-lg font-semibold">Skills</h2><div className="mt-3 space-y-2">{mastery.map((skill) => <Link key={skill.skillId} className="flex justify-between rounded-md border border-border p-3 text-sm" to={`/skills/${skill.skillId}`}><span>{skill.title}</span><span className="text-muted-foreground">{skill.state.replaceAll("_", " ")}</span></Link>)}</div>{!mastery.length ? <p className="mt-2 text-sm text-muted-foreground">Complete practice or scenarios to build skill evidence.</p> : null}</Panel>
+          <Panel><h2 className="text-lg font-semibold">Recent Achievements</h2><div className="mt-3 space-y-2 text-sm"><div className="rounded-md border border-border p-3">CIP Foundations Complete</div><div className="rounded-md border border-border p-3">First Scenario Completed</div></div></Panel>
         </div>
       </div>
     </>
@@ -1321,6 +1372,281 @@ function TrainingRecord() {
   return <><PageHeader title="Training Record" subtitle="Completed learner transcript detail." /><Panel><div className="grid gap-3 md:grid-cols-2"><Info label="Learner" value={user.name} /><Info label="Employee / learner identifier" value={user.id.slice(0, 12)} /><Info label="Course" value={course.title} /><Info label="Course version" value={version?.version ?? "1.0"} /><Info label="Standard" value={course.subcategory ?? "NERC CIP"} /><Info label="Assignment date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Assigned"} /><Info label="Start date" value={enrollment?.startedAt ? new Date(enrollment.startedAt).toLocaleDateString() : "Started"} /><Info label="Completion date" value={evidence?.completedAt ? new Date(evidence.completedAt).toLocaleDateString() : "Not complete"} /><Info label="Final assessment" value={`${evidence?.assessmentScore ?? "N/A"}%`} /><Info label="Passing score" value="80%" /><Info label="Attempts used" value={String(data.assessmentAttempts.filter((attempt) => attempt.userId === user.id && attempt.courseId === course.id).length || 1)} /><Info label="Required Activities" value={evidence ? "Completed" : "In progress"} /><Info label="Acknowledgement" value={data.acknowledgements.some((item) => item.userId === user.id && item.courseId === course.id) ? "Submitted" : course.requireAcknowledgement ? "Pending" : "Not required"} /><Info label="Certificate" value={cert?.certificateId ?? "Not issued"} /><Info label="Record status" value={evidence ? "Complete" : "In Progress"} /></div></Panel></>;
 }
 
+function PracticeCenter() {
+  const { data, user } = useApp();
+  const [query, setQuery] = useState("");
+  const [skill, setSkill] = useState("All");
+  const recommendations = LearningRecommendationService.getRecommendations(data, user.id).filter((item) => item.recommendationType === "PRACTICE_ACTIVITY" || item.recommendationType === "REFRESHER");
+  const visible = data.practiceActivities.filter((activity) => activity.status === "PUBLISHED" && (!query || [activity.title, activity.description, activity.activityType].join(" ").toLowerCase().includes(query.toLowerCase())) && (skill === "All" || activity.skillIds.includes(skill)));
+  const recent = data.practiceAttempts.filter((attempt) => attempt.userId === user.id).slice(-5).reverse();
+  const categories = ["QUICK_CHALLENGE", "EVIDENCE_CHALLENGE", "SYSTEM_INSPECTION", "DECISION_EXERCISE", "KNOWLEDGE_REFRESH", "MICROLEARNING"];
+  return (
+    <>
+      <PageHeader title="Practice" subtitle="Strengthen specific skills with short, focused learning activities." />
+      {recommendations.length ? <div className="grid gap-4 lg:grid-cols-2">{recommendations.slice(0, 2).map((recommendation) => {
+        const activity = data.practiceActivities.find((item) => item.id === recommendation.targetId);
+        return activity ? <PracticeCard key={recommendation.id} activity={activity} reason={recommendation.reason} /> : null;
+      })}</div> : null}
+      <Panel className="mt-5">
+        <div className="flex flex-wrap gap-3">
+          <input className="h-10 min-w-72 rounded-md border border-border bg-transparent px-3" placeholder="Search practice, skills, or topics" value={query} onChange={(event) => setQuery(event.target.value)} />
+          <select className="h-10 rounded-md border border-border bg-transparent px-3" value={skill} onChange={(event) => setSkill(event.target.value)}>
+            <option value="All">All skills</option>
+            {data.skills.map((item) => <option key={item.id} value={item.id}>{item.name}</option>)}
+          </select>
+        </div>
+      </Panel>
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_320px]">
+        <div className="space-y-5">
+          {categories.map((category) => {
+            const activities = visible.filter((activity) => activity.activityType === category);
+            return activities.length ? <section key={category}><h2 className="mb-3 text-lg font-semibold">{titleize(category.toLowerCase())}</h2><div className="grid gap-4 lg:grid-cols-2">{activities.map((activity) => <PracticeCard key={activity.id} activity={activity} />)}</div></section> : null;
+          })}
+          {!visible.length ? <EmptyState text="No practice activities match these filters." action="Clear Filters" onClick={() => { setQuery(""); setSkill("All"); }} /> : null}
+        </div>
+        <Panel>
+          <h2 className="font-semibold">Recent Practice</h2>
+          <div className="mt-3 space-y-2 text-sm">
+            {recent.map((attempt) => <div key={attempt.id} className="rounded-md border border-border p-3"><p className="font-medium">{data.practiceActivities.find((activity) => activity.id === attempt.practiceActivityId)?.title}</p><p className="text-muted-foreground">{attempt.topicResults[0]?.result.replaceAll("_", " ") ?? "Completed"} · {attempt.durationSeconds ? Math.round(attempt.durationSeconds / 60) : 0} min</p></div>)}
+            {!recent.length ? <p className="text-muted-foreground">No practice attempts yet.</p> : null}
+          </div>
+        </Panel>
+      </div>
+    </>
+  );
+}
+
+function PracticeCard({ activity, reason }: { activity: AppData["practiceActivities"][number]; reason?: string }) {
+  const { data } = useApp();
+  return <Panel><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{activity.activityType.replaceAll("_", " ")}</p><h3 className="mt-2 font-semibold">{activity.title}</h3><p className="mt-1 text-sm text-muted-foreground">{activity.description}</p><p className="mt-3 text-sm">{activity.estimatedMinutes} min · {titleize(activity.difficulty.toLowerCase())}</p><p className="mt-2 text-xs text-muted-foreground">Skills: {activity.skillIds.map((idValue) => data.skills.find((skill) => skill.id === idValue)?.name).filter(Boolean).join(", ")}</p>{reason ? <div className="mt-3 rounded-md bg-cyan-50 p-3 text-sm text-cyan-950 dark:bg-cyan-950 dark:text-cyan-100">Recommended because: {reason}</div> : null}<Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white" to={`/practice/${activity.id}`}>Practice Now</Link></Panel>;
+}
+
+function PracticeActivityPage() {
+  const { activityId } = useParams();
+  const { data, user, service, setData, toast } = useApp();
+  const navigate = useNavigate();
+  const activity = data.practiceActivities.find((item) => item.id === activityId);
+  const [answers, setAnswers] = useState<Record<string, number>>({});
+  const [done, setDone] = useState(false);
+  if (!activity) return <NotFound />;
+  const submit = async () => {
+    const svc = service();
+    const attempt = await svc.completePracticeActivity(activity.id, answers, "SELF_SELECTED");
+    setData(svc.snapshot());
+    toast("Practice completed");
+    setDone(true);
+    return attempt;
+  };
+  if (done) {
+    const latest = data.practiceAttempts.filter((attempt) => attempt.userId === user.id && attempt.practiceActivityId === activity.id).at(-1);
+    return <><PageHeader title="Challenge Complete" subtitle={activity.title} /><Panel><h2 className="text-2xl font-semibold">Recommended action</h2><p className="mt-2 text-muted-foreground">{activity.blocks.find((block) => block.type === "decision_cards")?.body ?? "Follow the approved process and retain useful evidence."}</p><div className="mt-4 grid gap-3 md:grid-cols-3"><Info label="Result" value={latest?.topicResults[0]?.result.replaceAll("_", " ") ?? "Strong"} /><Info label="Skill" value={activity.skillIds.map((idValue) => data.skills.find((skill) => skill.id === idValue)?.name).filter(Boolean).join(", ")} /><Info label="Record" value="Practice activity saved" /></div><div className="mt-5 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/practice">Try Another</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/skills">View Skills</Link><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => navigate("/home")}>Return Home</button></div></Panel></>;
+  }
+  return (
+    <>
+      <PageHeader title={activity.title} subtitle={`${activity.activityType.replaceAll("_", " ")} · ${activity.estimatedMinutes} min · ${activity.difficulty}`} />
+      <div className="mx-auto max-w-3xl">
+        {activity.blocks.map((block) => block.type === "decision_cards" ? <PracticeDecision key={block.id} block={block} value={answers[block.id]} onChange={(value) => setAnswers((current) => ({ ...current, [block.id]: value }))} /> : <Panel key={block.id} className="mb-4"><h2 className="font-semibold">{block.title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground whitespace-pre-line">{block.body}</p></Panel>)}
+        <button className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white disabled:opacity-50" disabled={!activity.blocks.filter((block) => block.required).every((block) => answers[block.id] !== undefined)} onClick={submit}>Complete Challenge</button>
+      </div>
+    </>
+  );
+}
+
+function PracticeDecision({ block, value, onChange }: { block: AppData["practiceActivities"][number]["blocks"][number]; value?: number; onChange: (value: number) => void }) {
+  const data = block.data as { question?: string; options?: string[]; correct?: number; feedback?: string[] } | undefined;
+  return <Panel className="mb-4"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Decision</p><h2 className="mt-2 text-xl font-semibold">{data?.question ?? block.title}</h2><div className="mt-4 grid gap-3">{(data?.options ?? []).map((option, index) => <button key={option} className={`rounded-md border p-4 text-left ${value === index ? "border-cyan-700 bg-cyan-50 dark:bg-cyan-950" : "border-border"}`} onClick={() => onChange(index)}>{option}{value === index ? <p className="mt-2 text-sm text-muted-foreground">{data?.feedback?.[index]}</p> : null}</button>)}</div></Panel>;
+}
+
+function ScenarioLab() {
+  const { data } = useApp();
+  const categories = Array.from(new Set(data.scenarioDefinitions.map((scenario) => scenario.category)));
+  return <><PageHeader title="Scenario Lab" subtitle="Practice making cybersecurity and compliance decisions in realistic situations." /><div className="grid gap-4 md:grid-cols-4">{["Personnel", "Access", "System Security", "Incident Response"].map((label) => <Panel key={label}><p className="font-semibold">{label}</p><p className="text-sm text-muted-foreground">{data.scenarioDefinitions.filter((scenario) => scenario.category.includes(label)).length} scenarios</p></Panel>)}</div><div className="mt-5 space-y-5">{categories.map((category) => <section key={category}><h2 className="mb-3 text-lg font-semibold">{category}</h2><div className="grid gap-4 lg:grid-cols-2">{data.scenarioDefinitions.filter((scenario) => scenario.category === category).map((scenario) => <ScenarioCard key={scenario.id} scenario={scenario} />)}</div></section>)}</div></>;
+}
+
+function ScenarioCard({ scenario }: { scenario: AppData["scenarioDefinitions"][number] }) {
+  const { data } = useApp();
+  return <Panel><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{scenario.category}</p><h3 className="mt-2 font-semibold">{scenario.title}</h3><p className="mt-1 text-sm text-muted-foreground">{scenario.description}</p><p className="mt-3 text-sm">{scenario.estimatedMinutes} min · {scenario.difficulty}</p><p className="mt-2 text-xs text-muted-foreground">Skills: {scenario.skillIds.map((idValue) => data.skills.find((skill) => skill.id === idValue)?.name).filter(Boolean).join(", ")}</p><Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm font-medium text-white" to={`/scenarios/${scenario.id}`}>Start Scenario</Link></Panel>;
+}
+
+function ScenarioDetail() {
+  const { scenarioId } = useParams();
+  const { data, service, setData } = useApp();
+  const navigate = useNavigate();
+  const scenario = data.scenarioDefinitions.find((item) => item.id === scenarioId);
+  if (!scenario) return <NotFound />;
+  const attempts = data.branchingScenarioAttempts.filter((attempt) => attempt.scenarioId === scenario.id);
+  const start = async (replayOfAttemptId?: string) => {
+    const svc = service();
+    const attempt = await svc.startBranchingScenario(scenario.id, replayOfAttemptId);
+    setData(svc.snapshot());
+    navigate(`/scenarios/${scenario.id}/run/${attempt.id}`);
+  };
+  return <><PageHeader title={scenario.title} subtitle={scenario.description} action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => start()}>Start Scenario</button>} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="font-semibold">What You’ll Practice</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">{scenario.skillIds.map((idValue) => <li key={idValue}>{data.skills.find((skill) => skill.id === idValue)?.name}</li>)}</ul><h2 className="mt-6 font-semibold">Related Courses</h2><div className="mt-3 flex flex-wrap gap-2">{scenario.relatedCourseIds.map((idValue) => <Link key={idValue} className="rounded-md border border-border px-3 py-2 text-sm" to={`/courses/${idValue}`}>{data.courses.find((course) => course.id === idValue)?.shortTitle ?? idValue}</Link>)}</div></Panel><Panel><h2 className="font-semibold">Previous Attempts</h2><div className="mt-3 space-y-2">{attempts.map((attempt) => <div key={attempt.id} className="rounded-md border border-border p-3 text-sm"><p>{attempt.completedAt ? "Completed" : "In progress"} · {attempt.overallResult.replaceAll("_", " ")}</p><button className="mt-2 rounded-md border border-border px-2 py-1 text-xs" onClick={() => start(attempt.id)}>Replay</button></div>)}{!attempts.length ? <p className="text-sm text-muted-foreground">No attempts yet.</p> : null}</div></Panel></div></>;
+}
+
+function ScenarioRun() {
+  const { scenarioId, attemptId } = useParams();
+  const { data, service, setData, toast } = useApp();
+  const navigate = useNavigate();
+  const scenario = data.scenarioDefinitions.find((item) => item.id === scenarioId);
+  const attempt = data.branchingScenarioAttempts.find((item) => item.id === attemptId);
+  if (!scenario || !attempt) return <NotFound />;
+  if (attempt.completedAt) return <ScenarioResult scenario={scenario} attempt={attempt} />;
+  const step = scenario.steps.find((item) => item.id === attempt.currentStepId) ?? scenario.steps[0];
+  const choose = async (choice: NonNullable<AppData["scenarioDefinitions"][number]["steps"][number]["choices"]>[number]) => {
+    const svc = service();
+    const nextAttempt = await svc.chooseScenarioChoice(attempt.id, step.id, choice.id);
+    setData(svc.snapshot());
+    toast(choice.quality === "RECOMMENDED" ? "Recommended decision saved" : "Decision saved");
+    if (nextAttempt.completedAt) navigate(`/scenarios/${scenario.id}/run/${attempt.id}`);
+  };
+  return <div className="-m-4 min-h-[calc(100vh-2rem)] bg-slate-950 p-4 text-slate-100 md:-m-6 md:p-6"><div className="mx-auto max-w-5xl"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">{scenario.category} · Step {scenario.steps.findIndex((item) => item.id === step.id) + 1} of {scenario.steps.length}</p><h1 className="mt-1 text-3xl font-semibold">{scenario.title}</h1></div><Link className="rounded-md border border-slate-700 px-3 py-2 text-sm" to={`/scenarios/${scenario.id}`}>Exit Scenario</Link></div><div className="mt-6 grid gap-5 lg:grid-cols-[360px_1fr]"><section className="rounded-md border border-slate-800 bg-slate-900 p-4"><h2 className="font-semibold">Workspace State</h2><div className="mt-3 space-y-2 text-sm">{Object.entries(attempt.currentState).map(([key, value]) => <div key={key} className="flex justify-between gap-3 border-b border-slate-800 py-2"><span className="text-slate-400">{titleize(key)}</span><span>{String(value)}</span></div>)}</div></section><section className="rounded-md border border-slate-800 bg-slate-900 p-5"><h2 className="text-xl font-semibold">{step.title ?? "Decision"}</h2><p className="mt-3 leading-7 text-slate-300">{step.narrative}</p><div className="mt-5 grid gap-3">{step.choices?.map((choice) => <button key={choice.id} className="rounded-md border border-slate-700 bg-slate-950 p-4 text-left hover:border-cyan-400 focus:border-cyan-400" onClick={() => choose(choice)}><span className="font-medium">{choice.label}</span>{choice.description ? <span className="mt-1 block text-sm text-slate-400">{choice.description}</span> : null}</button>)}</div></section></div></div></div>;
+}
+
+function ScenarioResult({ scenario, attempt }: { scenario: AppData["scenarioDefinitions"][number]; attempt: AppData["branchingScenarioAttempts"][number] }) {
+  return <><PageHeader title="Scenario Complete" subtitle={scenario.title} /><Panel><h2 className="text-2xl font-semibold">Overall: {attempt.overallResult.replaceAll("_", " ")}</h2><div className="mt-4 grid gap-4 lg:grid-cols-2"><div><h3 className="font-semibold">Strong decisions</h3><ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{attempt.decisions.filter((decision) => decision.quality === "RECOMMENDED").map((decision) => <li key={`${decision.stepId}-${decision.choiceId}`}>{decision.feedback}</li>)}</ul></div><div><h3 className="font-semibold">Review opportunities</h3><ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{attempt.decisions.filter((decision) => decision.quality !== "RECOMMENDED").map((decision) => <li key={`${decision.stepId}-${decision.choiceId}`}>{decision.feedback}</li>)}</ul></div></div><div className="mt-5 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/scenarios/${scenario.id}`}>Replay</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/practice">Recommended Practice</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/scenarios">Return to Scenario Lab</Link></div></Panel></>;
+}
+
+function RecommendationsPage() {
+  const { data, user, service, setData, toast } = useApp();
+  const recommendations = LearningRecommendationService.getRecommendations(data, user.id);
+  const dismiss = async (idValue: string) => { const svc = service(); await svc.dismissRecommendation(idValue); setData(svc.snapshot()); toast("Recommendation dismissed"); };
+  return <><PageHeader title="Recommendations" subtitle="Your next learning actions based on assignments, progress, skills, and reinforcement." /><div className="grid gap-4 lg:grid-cols-2">{recommendations.map((recommendation) => <Panel key={recommendation.id}><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{recommendation.reasonCode.replaceAll("_", " ")}</p><h2 className="mt-2 font-semibold">{recommendation.title}</h2><p className="mt-1 text-sm text-muted-foreground">{recommendation.reason}</p><div className="mt-4 flex gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={recommendation.href}>Open</Link>{!recommendation.required ? <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => dismiss(recommendation.id)}>Dismiss</button> : null}</div></Panel>)}</div></>;
+}
+
+function FollowUpsPage() {
+  const { data, user, service, setData, toast } = useApp();
+  const [title, setTitle] = useState("");
+  const mine = data.learnerFollowUps.filter((item) => item.userId === user.id);
+  const create = async () => { if (!title.trim()) return; const svc = service(); await svc.createLearnerFollowUp({ title, sourceType: "MANUAL" }); setData(svc.snapshot()); setTitle(""); toast("Follow-up saved"); };
+  const complete = async (idValue: string) => { const svc = service(); await svc.updateFollowUp(idValue, { completed: true }); setData(svc.snapshot()); };
+  return <><PageHeader title="My Follow-Ups" subtitle="Private actions you want to remember after training." /><Panel><div className="flex gap-2"><input className="h-10 flex-1 rounded-md border border-border bg-transparent px-3" placeholder="Add a private follow-up..." value={title} onChange={(event) => setTitle(event.target.value)} /><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={create}>Add</button></div></Panel><div className="mt-5 grid gap-4 lg:grid-cols-2">{mine.map((followUp) => <Panel key={followUp.id}><h2 className="font-semibold">{followUp.title}</h2><p className="mt-1 text-sm text-muted-foreground">{followUp.visibility === "PRIVATE" ? "Private" : "Shared with manager"} · {followUp.completedAt ? "Completed" : "Open"}</p>{!followUp.completedAt ? <button className="mt-3 rounded-md border border-border px-3 py-2 text-sm" onClick={() => complete(followUp.id)}>Mark Complete</button> : null}</Panel>)}</div></>;
+}
+
+function LearningMapPage() {
+  const { data, user } = useApp();
+  const nodes = ["course-annual-awareness", "course-cip004-foundations", "course-cip005-esp-access", "course-cip006-physical-security", "course-cip007-system-security", "course-cip010-change-vulnerability", "course-cip008-incident-response", "course-cip015-insm", "course-cip002-categorization", "course-cip003-security-management", "course-audit-preparation"];
+  return <><PageHeader title="Learning Map" subtitle="See how NERC CIP capabilities build across courses, practice, and scenarios." /><Panel><div className="grid gap-3 md:grid-cols-3">{nodes.map((courseId, index) => { const course = data.courses.find((item) => item.id === courseId); if (!course) return null; const state = getCourseCompletionState(data, user.id, course.id); return <Link key={course.id} className="rounded-md border border-border p-4 hover:border-cyan-700" to={`/courses/${course.id}`}><p className="text-xs text-muted-foreground">Step {index + 1}</p><h2 className="mt-1 font-semibold">{course.shortTitle ?? course.title}</h2><p className="mt-2 text-sm text-muted-foreground">{state.courseComplete ? "Complete" : state.percent ? "In Progress" : "Available"} · {state.percent}%</p></Link>; })}</div></Panel></>;
+}
+
+function CampaignLearnerPage() {
+  const { campaignId } = useParams();
+  const { data } = useApp();
+  const campaign = data.learningCampaigns.find((item) => item.id === campaignId);
+  if (!campaign) return <NotFound />;
+  return <><PageHeader title={campaign.title} subtitle={campaign.description} /><Panel><p className="text-sm text-muted-foreground">Due {campaign.dueAt ? new Date(campaign.dueAt).toLocaleDateString() : "No due date"}.</p><div className="mt-4 space-y-2">{campaign.items.sort((left, right) => left.order - right.order).map((item) => <CampaignItem key={item.id} item={item} />)}</div></Panel></>;
+}
+
+function CampaignItem({ item }: { item: AppData["learningCampaigns"][number]["items"][number] }) {
+  const { data } = useApp();
+  const label = item.itemType === "COURSE" ? data.courses.find((course) => course.id === item.targetId)?.title : item.itemType === "PRACTICE" ? data.practiceActivities.find((activity) => activity.id === item.targetId)?.title : data.scenarioDefinitions.find((scenario) => scenario.id === item.targetId)?.title;
+  const href = item.itemType === "COURSE" ? `/courses/${item.targetId}` : item.itemType === "PRACTICE" ? `/practice/${item.targetId}` : `/scenarios/${item.targetId}`;
+  return <Link className="flex items-center justify-between rounded-md border border-border p-3 text-sm" to={href}><span>{label}</span><span className="text-muted-foreground">{item.required ? "Required" : "Optional"}</span></Link>;
+}
+
+function ManagerCoaching() {
+  const { data, user, service, setData, toast } = useApp();
+  const opportunities = getCoachingOpportunities(data, user.id);
+  const assign = async (learnerId: string, activityId?: string) => {
+    if (!activityId) return;
+    const svc = service();
+    await svc.assignLearningItem("PRACTICE", activityId, [{ audienceType: "USER", audienceId: learnerId }], addDays(new Date(), 14).toISOString(), "Practice assigned from manager coaching.");
+    setData(svc.snapshot());
+    toast("Practice assigned");
+  };
+  return <><PageHeader title="Coaching" subtitle="Identify meaningful learning opportunities based on recent activity." /><div className="grid gap-4 lg:grid-cols-2">{opportunities.map((item) => { const learner = data.users.find((candidate) => candidate.id === item.userId); const skill = data.skills.find((candidate) => candidate.id === item.skillId); const activity = data.practiceActivities.find((candidate) => candidate.id === item.activityId); return <Panel key={`${item.userId}-${item.skillId}`}><h2 className="font-semibold">{learner?.name}</h2><p className="mt-1 text-sm text-muted-foreground">{skill?.name} · {item.priority} priority</p><p className="mt-3 text-sm">Suggested: assign {activity?.title ?? "targeted practice"}.</p><button className="mt-4 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => assign(item.userId, item.activityId)}>Assign Practice</button></Panel>; })}</div>{!opportunities.length ? <EmptyState text="No coaching opportunities require attention." action="View Team" href="/team" /> : null}</>;
+}
+
+function ManagerCampaigns() {
+  const { data, user, service, setData, toast } = useApp();
+  const create = async () => {
+    const team = data.teams.find((item) => item.managerId === user.id) ?? data.teams[0];
+    const svc = service();
+    await svc.createCampaign({ title: "Q4 Cybersecurity Readiness", description: "Awareness, MFA practice, and incident scenario reinforcement.", audienceType: "TEAM", audienceIds: team ? [team.id] : [], dueAt: addDays(new Date(), 45).toISOString(), items: [{ id: "new-campaign-awareness", order: 1, itemType: "COURSE", targetId: "course-annual-awareness", required: true }, { id: "new-campaign-mfa", order: 2, itemType: "PRACTICE", targetId: "practice-unexpected-mfa", required: true }, { id: "new-campaign-admin", order: 3, itemType: "SCENARIO", targetId: "scenario-unexpected-admin-connection", required: true }] });
+    setData(svc.snapshot());
+    toast("Campaign created");
+  };
+  return <><PageHeader title="Campaigns" subtitle="Group courses, practice, and scenarios into a focused learning push." action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={create}>Create Q4 Campaign</button>} /><div className="grid gap-4 lg:grid-cols-2">{data.learningCampaigns.map((campaign) => <Panel key={campaign.id}><h2 className="font-semibold">{campaign.title}</h2><p className="mt-1 text-sm text-muted-foreground">{campaign.description}</p><p className="mt-3 text-sm">{campaign.items.length} items · {campaign.status}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={`/campaigns/${campaign.id}`}>View Campaign</Link></Panel>)}</div></>;
+}
+
+function PracticeAuthoring() {
+  const { data, service, setData, toast } = useApp();
+  const create = async () => {
+    const title = prompt("Practice activity title", "Temporary Elevated Access Challenge");
+    if (!title) return;
+    const svc = service();
+    const snapshot = svc.snapshot();
+    const skill = snapshot.skills.find((item) => item.name === "Access Management") ?? snapshot.skills[0];
+    const idValue = `practice-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
+    const activity = {
+      id: idValue,
+      title,
+      subtitle: "Author-created decision practice",
+      description: "A short decision activity created in Course Management.",
+      activityType: "DECISION_EXERCISE" as const,
+      status: "PUBLISHED" as const,
+      estimatedMinutes: 5,
+      difficulty: "INTERMEDIATE" as const,
+      standardIds: [],
+      skillIds: skill ? [skill.id] : [],
+      topicIds: skill ? [skill.id] : [],
+      relatedCourseIds: [],
+      relatedLessonIds: [],
+      blocks: [
+        { id: `${idValue}-brief`, type: "paragraph", title: "Situation", body: "A temporary elevated access request needs review before approval.", position: 1 },
+        { id: `${idValue}-decision`, type: "decision_cards", title: "Decision", body: "Choose the responsible approval action.", required: true, position: 2, data: { question: "What should the approver confirm?", options: ["Purpose, scope, owner, duration, and evidence", "Only that the requester is busy", "Nothing if access is temporary"], correct: 0, feedback: ["Recommended.", "Not enough basis.", "Temporary access still needs control."] } }
+      ],
+      scoringMode: "COMPETENCY" as const,
+      passingScore: 80,
+      repeatable: true,
+      recommendationWeight: 1,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    };
+    snapshot.practiceActivities.push(activity);
+    await svc.persist();
+    setData(svc.snapshot());
+    toast("Practice activity published");
+  };
+  return <><PageHeader title="Practice Activity Builder" subtitle="Create standalone practice that can be recommended or assigned." action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={create}>Create Practice</button>} /><div className="grid gap-4 lg:grid-cols-2">{data.practiceActivities.map((activity) => <Panel key={activity.id}><h2 className="font-semibold">{activity.title}</h2><p className="mt-1 text-sm text-muted-foreground">{activity.description}</p><p className="mt-3 text-sm">{activity.status} · {activity.blocks.length} blocks · {activity.skillIds.length} skills</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={`/practice/${activity.id}`}>Preview</Link></Panel>)}</div></>;
+}
+
+function ScenarioAuthoring() {
+  const { data, service, setData, toast } = useApp();
+  const create = async () => {
+    const title = prompt("Scenario title", "Late-Night Vendor Access");
+    if (!title) return;
+    const svc = service();
+    const snapshot = svc.snapshot();
+    const skill = snapshot.skills.find((item) => item.name === "Electronic Access") ?? snapshot.skills[0];
+    const idValue = `scenario-${title.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/(^-|-$)/g, "")}`;
+    snapshot.scenarioDefinitions.push({
+      id: idValue,
+      title,
+      description: "A branching scenario created in Course Management.",
+      category: "Access",
+      difficulty: "INTERMEDIATE",
+      estimatedMinutes: 7,
+      relatedCourseIds: ["course-cip005-esp-access"],
+      skillIds: skill ? [skill.id] : [],
+      topicIds: skill ? [skill.id] : [],
+      initialState: { request: "urgent vendor access", schedule: "late night" },
+      steps: [
+        { id: `${idValue}-1`, stepType: "DECISION", narrative: "A vendor requests late-night access outside the normal schedule.", choices: [{ id: "approved-path", label: "Use approved emergency access path", feedback: "Recommended. Urgency still needs accountability.", principleTags: ["authorization"], impact: [{ field: "authorized", value: true }], nextStepId: `${idValue}-2`, quality: "RECOMMENDED" }, { id: "shortcut", label: "Share a credential temporarily", feedback: "Risky. Shared informal access weakens accountability.", principleTags: ["least privilege"], impact: [{ field: "shortcut", value: true }], nextStepId: `${idValue}-2`, quality: "INCORRECT" }] },
+        { id: `${idValue}-2`, stepType: "DECISION", narrative: "What evidence should be retained?", choices: [{ id: "trace", label: "Sponsor, reason, method, scope, start/end, approval, closure", feedback: "Recommended.", principleTags: ["evidence"], impact: [{ field: "evidence", value: true }], quality: "RECOMMENDED" }, { id: "thin", label: "A note saying access happened", feedback: "Too thin for later review.", principleTags: ["evidence"], impact: [{ field: "evidence", value: false }], quality: "RISKY" }] }
+      ],
+      resultRules: [{ id: `${idValue}-strong`, result: "STRONG", minRecommendedChoices: 2 }, { id: `${idValue}-developing`, result: "DEVELOPING", minRecommendedChoices: 1 }],
+      repeatable: true,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+    await svc.persist();
+    setData(svc.snapshot());
+    toast("Scenario published");
+  };
+  return <><PageHeader title="Scenario Builder" subtitle="Create branching operational scenarios with decisions, feedback, and state changes." action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={create}>Create Scenario</button>} /><div className="grid gap-4 lg:grid-cols-2">{data.scenarioDefinitions.map((scenario) => <Panel key={scenario.id}><h2 className="font-semibold">{scenario.title}</h2><p className="mt-1 text-sm text-muted-foreground">{scenario.description}</p><p className="mt-3 text-sm">{scenario.steps.length} steps · {scenario.skillIds.length} skills</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={`/scenarios/${scenario.id}`}>Preview</Link></Panel>)}</div></>;
+}
+
 function QuestionBank() {
   const { data } = useApp();
   return <><PageHeader title="Question Bank" subtitle="Reusable assessment questions by course, standard, difficulty, and type." /><Panel><Table headers={["Question", "Type", "Difficulty"]} rows={data.questions.map((q) => [q.prompt, q.type, q.difficulty])} /></Panel></>;
@@ -1371,7 +1697,21 @@ function Certifications() {
 
 function SkillsPage() {
   const { data, user } = useApp();
-  return <><PageHeader title="Skills" subtitle="Training demonstrates learning progress toward applied capability." /><div className="grid gap-4 lg:grid-cols-3">{data.skills.map((skill) => <Panel key={skill.id}><h2 className="font-semibold">{skill.name}</h2><p className="mt-2 text-sm text-muted-foreground">{skill.description}</p><p className="mt-3 text-sm">Level: {data.userSkills.find((item) => item.userId === user.id && item.skillId === skill.id)?.level ?? "Awareness"}</p></Panel>)}</div></>;
+  const mastery = SkillMasteryService.getSkillMastery(data, user.id);
+  const categories = Array.from(new Set(mastery.map((skill) => skill.category)));
+  return <><PageHeader title="My Skills" subtitle="See the capabilities you are building across courses, scenarios and practice." /><div className="space-y-5">{categories.map((category) => <section key={category}><h2 className="mb-3 text-lg font-semibold">{category}</h2><div className="grid gap-4 lg:grid-cols-3">{mastery.filter((skill) => skill.category === category).map((skill) => <Link key={skill.skillId} to={`/skills/${skill.skillId}`}><Panel><h3 className="font-semibold">{skill.title}</h3><p className="mt-2 text-sm text-muted-foreground">{skill.state.replaceAll("_", " ")}</p><p className="mt-3 text-xs text-muted-foreground">{skill.evidenceCount ? `${skill.evidenceCount} evidence item${skill.evidenceCount === 1 ? "" : "s"}` : "No evidence yet"}</p>{skill.recommendedActivityId ? <p className="mt-3 text-sm text-cyan-700">Recommended practice available</p> : null}</Panel></Link>)}</div></section>)}</div></>;
+}
+
+function SkillDetailPage() {
+  const { skillId } = useParams();
+  const { data, user } = useApp();
+  const mastery = SkillMasteryService.getSkillMastery(data, user.id).find((item) => item.skillId === skillId);
+  const skill = data.skills.find((item) => item.id === skillId);
+  if (!skill || !mastery) return <NotFound />;
+  const evidence = data.skillEvidence.filter((item) => item.userId === user.id && item.skillId === skill.id).sort((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime());
+  const practices = data.practiceActivities.filter((activity) => activity.skillIds.includes(skill.id));
+  const scenarios = data.scenarioDefinitions.filter((scenario) => scenario.skillIds.includes(skill.id));
+  return <><PageHeader title={skill.name} subtitle={skill.description} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="text-xl font-semibold">{mastery.state.replaceAll("_", " ")}</h2><p className="mt-2 text-sm text-muted-foreground">Current state is calculated from recent course, practice, and scenario evidence.</p><h3 className="mt-6 font-semibold">Recent Evidence</h3><div className="mt-3 space-y-2">{evidence.map((item) => <div key={item.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{item.details ?? item.sourceType.replaceAll("_", " ")}</p><p className="text-muted-foreground">{item.result.replaceAll("_", " ")} · {new Date(item.observedAt).toLocaleDateString()}</p></div>)}{!evidence.length ? <p className="text-sm text-muted-foreground">Complete related courses, practice, or scenarios to build evidence.</p> : null}</div></Panel><Panel><h2 className="font-semibold">Recommended Next</h2><div className="mt-3 space-y-2">{practices.slice(0, 3).map((activity) => <Link key={activity.id} className="block rounded-md border border-border p-3 text-sm" to={`/practice/${activity.id}`}>{activity.title}<span className="block text-xs text-muted-foreground">{activity.estimatedMinutes} min practice</span></Link>)}{scenarios.slice(0, 3).map((scenario) => <Link key={scenario.id} className="block rounded-md border border-border p-3 text-sm" to={`/scenarios/${scenario.id}`}>{scenario.title}<span className="block text-xs text-muted-foreground">{scenario.estimatedMinutes} min scenario</span></Link>)}</div></Panel></div></>;
 }
 
 function AdminHome() {
