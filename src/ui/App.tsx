@@ -830,8 +830,8 @@ function CoursePlayer({ onNotes }: { onNotes: () => void }) {
   };
   const lessonDone = data.lessonProgress.some((progress) => progress.userId === user.id && progress.lessonId === lesson.id && progress.completedAt);
   const requiredActivities = blocks.filter((block) => block.required && block.type !== "knowledge_check");
-  const activitiesDone = requiredActivities.every((block) => data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED"));
-  const canCompleteLesson = !requiredActivities.length || activitiesDone;
+  const activitiesDone = lessonDone || requiredActivities.every((block) => data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED"));
+  const canCompleteLesson = lessonDone || !requiredActivities.length || activitiesDone;
   return (
     <div className="grid gap-5 xl:grid-cols-[280px_1fr_280px]">
       <Panel className="xl:sticky xl:top-20 xl:h-[calc(100vh-6rem)] xl:overflow-auto">
@@ -980,7 +980,8 @@ function KnowledgeCheck({ block }: { block: ContentBlock }) {
 
 function ActivityBlock({ block, onComplete }: { block: ContentBlock; courseId: string; lessonId: string; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
   const { data, user } = useApp();
-  const saved = data.scenarioAttempts.find((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED");
+  const lessonCompleted = data.lessonProgress.some((progress) => progress.userId === user.id && progress.lessonId === block.lessonId && progress.completedAt);
+  const saved = lessonCompleted || data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED");
   const config = block.data as { instruction?: string; prompt?: string; categories?: string[]; items?: Array<{ text: string; correct: string }>; options?: string[]; correct?: number[]; success?: string; retry?: string };
   const [answers, setAnswers] = useState<Record<string, string | boolean>>({});
   const [feedback, setFeedback] = useState("");

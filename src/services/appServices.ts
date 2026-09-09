@@ -48,6 +48,7 @@ export interface CourseCompletionState {
 export interface Session {
   sessionId: string;
   userId: string;
+  email?: string;
   organizationId: string;
   loginAt: string;
   lastActivityAt: string;
@@ -284,23 +285,38 @@ export class AuthService {
     await initializeDatabase();
     const data = await getAllData();
     const catalogVersion = Number(data.applicationSettings.find((setting) => setting.key === "catalogContentVersion")?.value ?? 0);
-    if (catalogVersion >= 4) return data;
-
     const session = this.getSession();
-    const activeEmail = session ? data.users.find((user) => user.id === session.userId)?.email : undefined;
+    if (catalogVersion >= 4) {
+      this.remapSessionIfNeeded(data, session);
+      return data;
+    }
+
+    const activeEmail = session?.email ?? (session ? data.users.find((user) => user.id === session.userId)?.email : undefined);
     const fresh = createSeedData();
     await replaceAllData(fresh);
 
     if (session && activeEmail) {
       const remappedUser = fresh.users.find((user) => user.email === activeEmail);
       if (remappedUser) {
-        const sessions = JSON.parse(localStorage.getItem(sessionStoreKey) ?? "{}") as Record<string, Session>;
-        sessions[session.sessionId] = { ...session, userId: remappedUser.id, organizationId: remappedUser.organizationId, lastActivityAt: now() };
-        localStorage.setItem(sessionStoreKey, JSON.stringify(sessions));
+        this.saveSession({ ...session, userId: remappedUser.id, email: remappedUser.email, organizationId: remappedUser.organizationId, lastActivityAt: now() });
       }
     }
 
     return fresh;
+  }
+
+  private static remapSessionIfNeeded(data: AppData, session: Session | undefined) {
+    if (!session || data.users.some((user) => user.id === session.userId)) return;
+    if (!session.email) return;
+    const remappedUser = data.users.find((user) => user.email === session.email);
+    if (!remappedUser) return;
+    this.saveSession({ ...session, userId: remappedUser.id, organizationId: remappedUser.organizationId, lastActivityAt: now() });
+  }
+
+  private static saveSession(session: Session) {
+    const sessions = JSON.parse(localStorage.getItem(sessionStoreKey) ?? "{}") as Record<string, Session>;
+    sessions[session.sessionId] = session;
+    localStorage.setItem(sessionStoreKey, JSON.stringify(sessions));
   }
 
   static getSession(): Session | undefined {
@@ -314,7 +330,7 @@ export class AuthService {
     const data = await getAllData();
     const user = data.users.find((item) => item.email.toLowerCase() === email.toLowerCase() && item.password === passwordValue && item.status === "ACTIVE");
     if (!user) throw new Error("Email or password is incorrect.");
-    const session: Session = { sessionId: id("session"), userId: user.id, organizationId: user.organizationId, loginAt: now(), lastActivityAt: now() };
+    const session: Session = { sessionId: id("session"), userId: user.id, email: user.email, organizationId: user.organizationId, loginAt: now(), lastActivityAt: now() };
     const sessions = JSON.parse(localStorage.getItem(sessionStoreKey) ?? "{}") as Record<string, Session>;
     sessions[session.sessionId] = session;
     localStorage.setItem(sessionStoreKey, JSON.stringify(sessions));
@@ -328,7 +344,7 @@ export class AuthService {
     const data = await getAllData();
     const user = data.users.find((item) => item.id === userId);
     if (!user) throw new Error("User not found.");
-    const session: Session = { sessionId: id("session"), userId: user.id, organizationId: user.organizationId, loginAt: now(), lastActivityAt: now() };
+    const session: Session = { sessionId: id("session"), userId: user.id, email: user.email, organizationId: user.organizationId, loginAt: now(), lastActivityAt: now() };
     const sessions = JSON.parse(localStorage.getItem(sessionStoreKey) ?? "{}") as Record<string, Session>;
     sessions[session.sessionId] = session;
     localStorage.setItem(sessionStoreKey, JSON.stringify(sessions));
@@ -1070,6 +1086,14 @@ export class WorkflowService {
         updatedAt: now()
       });
     }
+    if (!this.data.lessonProgress.some((item) => item.userId === this.actorId && item.lessonId === lessonId && item.completedAt)) {
+      this.data.lessonProgress.push({ id: id("lp"), userId: this.actorId, lessonId, completedAt: now(), createdAt: now(), updatedAt: now() });
+      audit(this.data, this.actorId, "LESSON_COMPLETED", "Lesson", lessonId, "Completed lesson after required activity.");
+    }
+    const enrollment = this.ensureEnrollment(courseId);
+    enrollment.status = "IN_PROGRESS";
+    enrollment.lastAccessedAt = now();
+    enrollment.currentLessonId = lessonId;
     audit(this.data, this.actorId, "LEARNING_ACTIVITY_COMPLETED", "Course", courseId, "Completed required course activity.");
     this.recalculateCourseProgress(courseId);
     await this.persist();
