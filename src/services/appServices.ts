@@ -1330,7 +1330,8 @@ export function getCourseCompletionState(data: AppData, userId: string, courseId
   const assessmentLesson = lessons.find((lesson) => lesson.title.toLowerCase().includes("final assessment"));
   const acknowledgementLesson = lessons.find((lesson) => lesson.title.toLowerCase().includes("acknowledgement"));
   const normalRequiredLessons = lessons.filter((lesson) => lesson.required && !["final assessment", "learner acknowledgement", "completion summary", "certificate"].some((title) => lesson.title.toLowerCase().includes(title)));
-  const requiredActivityBlocks = data.contentBlocks.filter((block) => block.required && lessons.some((lesson) => lesson.id === block.lessonId) && ["scenario", "decision_exercise"].includes(block.type));
+  const requiredActivityTypes = ["scenario", "decision_exercise", "classification", "evidence_builder", "system_inspector", "evidence_inspector", "build_record", "network_explorer", "coverage_map", "sequence_builder", "ordering", "decision_cards", "rapid_decisions", "matching", "checklist_activity"];
+  const requiredActivityBlocks = data.contentBlocks.filter((block) => block.required && lessons.some((lesson) => lesson.id === block.lessonId) && requiredActivityTypes.includes(block.type));
   const requiredItems = [
     ...normalRequiredLessons.map((lesson) => lesson.id),
     ...requiredActivityBlocks.map((block) => block.id),

@@ -1290,7 +1290,30 @@ function CurriculumTab({ course, selectedLesson, selectedBlock, setSelectedLesso
               </div>
             </div>
             <div className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {["paragraph", "why_this_matters", "learning_objectives", "compliance_note", "procedure", "checklist", "knowledge_check", "scenario", "evidence_example", "audit_tip"].map((type) => (
+              {[
+                "paragraph",
+                "rich_text",
+                "definition",
+                "key_concept",
+                "why_this_matters",
+                "compliance_connection",
+                "audit_lens",
+                "process_diagram",
+                "before_after",
+                "timeline",
+                "knowledge_check",
+                "quick_recall",
+                "classification",
+                "sequence_builder",
+                "matching",
+                "decision_cards",
+                "rapid_decisions",
+                "system_inspector",
+                "evidence_inspector",
+                "network_explorer",
+                "build_record",
+                "scenario"
+              ].map((type) => (
                 <button key={type} className="rounded-md border border-border p-2 text-left text-sm hover:border-cyan-600" onClick={() => addBlock(type)}>+ {blockTitle(type)}</button>
               ))}
             </div>
@@ -1331,15 +1354,35 @@ function blockTitle(type: string) {
 }
 
 function defaultBlockBody(type: string) {
-  if (type === "knowledge_check") return "Which action best supports NERC CIP compliance readiness?";
-  if (type === "scenario") return "An employee's access responsibilities changed yesterday. Which action should occur first under the organization's CIP personnel process?";
-  if (type.includes("compliance")) return "Connect this topic to the mapped NERC CIP requirement and the evidence learners should produce.";
+  if (type === "knowledge_check" || type === "quick_recall") return "Which action best supports the process described in this lesson?";
+  if (type === "scenario") return "Use the information provided to choose the next responsible action.";
+  if (type === "audit_lens") return "Consider how another qualified reviewer would examine this activity later.";
+  if (type === "process_diagram") return "Review the process stages and the evidence each stage should leave behind.";
+  if (type === "before_after") return "Compare a weak record with a stronger, more traceable version.";
+  if (type === "system_inspector") return "Inspect the simulated system record and select items that deserve review.";
+  if (type === "evidence_inspector" || type === "build_record") return "Select the fields that make this record traceable and useful.";
+  if (type === "network_explorer") return "Explore the diagram and identify the path, owner, or visibility concern.";
+  if (type === "sequence_builder") return "Place the process steps in the most appropriate order.";
+  if (type === "decision_cards") return "Choose the response that best fits the approved process.";
+  if (type === "rapid_decisions") return "Work through each situation and decide whether to proceed, verify, or report.";
+  if (type === "matching") return "Match each concept with the best description.";
+  if (type.includes("compliance")) return "Connect this topic to the mapped NERC CIP concept and the evidence learners should recognize.";
   return "Add concise, job-relevant training content for this lesson.";
 }
 
 function defaultBlockData(type: string) {
-  if (type === "knowledge_check") return { answers: ["Document the decision and retain evidence", "Wait until the annual audit", "Rely on verbal confirmation"], correct: 0, explanation: "Evidence must be timely, traceable, and retained." };
-  if (type === "scenario") return { choices: ["Review role change and update access training", "Ignore until next quarter", "Delete historical records"], correct: 0, feedback: ["Correct. Start with the personnel change and access lifecycle process.", "This creates a compliance gap.", "Historical evidence must be retained."] };
+  if (type === "knowledge_check" || type === "quick_recall") return { answers: ["Follow the approved process and retain useful evidence", "Wait until the annual audit", "Rely only on verbal confirmation"], correct: 0, explanation: "The strongest answer connects action, accountability, and traceable evidence." };
+  if (type === "scenario") return { choices: ["Use the approved review process", "Ignore the change until the next audit", "Delete historical records"], correct: 0, feedback: ["Correct. Start with the defined process and preserve evidence.", "Waiting can leave the issue unresolved.", "Historical evidence must be retained."] };
+  if (type === "audit_lens") return { intro: "A reviewer may ask whether the activity can be reconstructed from retained records.", reviewerQuestions: ["Who performed the activity?", "What population or item was reviewed?", "When did it occur?", "What result was recorded?"], evidenceExamples: ["completed review record", "approval record", "exception or follow-up record"] };
+  if (type === "process_diagram") return { stages: ["Request", "Review", "Authorize", "Perform", "Verify", "Document"], caption: "A repeatable process leaves a clear path from trigger to evidence." };
+  if (type === "before_after") return { beforeTitle: "Weak Record", before: "Completed.", afterTitle: "Stronger Record", after: "The assigned owner completed the review on September 8, recorded the result, and routed required follow-up.", improvements: ["person", "activity", "date", "result", "follow-up"] };
+  if (type === "system_inspector") return { prompt: "Select the rows that deserve further review.", columns: ["Item", "Purpose", "State"], rows: [{ id: "approved", cells: ["Approved service", "Documented need", "Current"] }, { id: "expired", cells: ["Temporary privilege", "Project support", "Expired"] }, { id: "missing", cells: ["Legacy item", "Unknown", "Owner missing"] }], expected: ["expired", "missing"], success: "You identified the records that need review.", feedback: "Look for missing ownership, expired need, or unexplained access." };
+  if (type === "evidence_inspector" || type === "build_record") return { prompt: "Which fields make the record traceable?", fields: ["Learner or owner", "Activity", "Date", "Result", "Approver", "Favorite color"], expected: ["Learner or owner", "Activity", "Date", "Result", "Approver"], success: "The selected fields support identity, activity, timing, result, and accountability." };
+  if (type === "network_explorer") return { prompt: "Select the diagram elements that require review.", nodes: [{ id: "approved", label: "Approved Gateway", status: "approved" }, { id: "unknown", label: "Unknown Path", status: "unknown" }, { id: "unmonitored", label: "Unmonitored Segment", status: "unmonitored" }], expected: ["unknown", "unmonitored"], success: "Unknown and unmonitored paths should be routed for review." };
+  if (type === "sequence_builder") return { prompt: "Order the process.", steps: ["Identify", "Evaluate", "Decide", "Implement", "Verify", "Document"], success: "That sequence preserves the decision path." };
+  if (type === "decision_cards") return { question: "What is the best next action?", options: ["Use the approved process", "Bypass the process for speed", "Ignore the issue"], correct: 0, feedback: ["Correct. The approved process creates accountability.", "Speed does not remove process responsibility.", "Ignoring the issue leaves risk unresolved."] };
+  if (type === "rapid_decisions") return { actions: ["PROCEED", "VERIFY", "REPORT"], cards: [{ prompt: "Unexpected access prompt appears.", correct: "REPORT", feedback: "Unexpected access prompts should be reported." }, { prompt: "Scheduled approved update begins.", correct: "PROCEED", feedback: "Expected approved activity can proceed." }] };
+  if (type === "matching") return { prompt: "Match each item.", pairs: [{ left: "Evidence", right: "A retained record showing what occurred" }, { left: "Procedure", right: "How the work is performed" }, { left: "Owner", right: "The responsible person or group" }] };
   return undefined;
 }
 
