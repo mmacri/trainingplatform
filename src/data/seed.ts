@@ -97,7 +97,10 @@ function emptyData(): AppData {
     learningCampaigns: [],
     liveLearningSessions: [],
     contentFeedbackItems: [],
-    learningPreferences: []
+    learningPreferences: [],
+    learningSessions: [],
+    learnerAchievements: [],
+    learningResources: []
   };
 }
 
@@ -582,6 +585,7 @@ export function createSeedData(): AppData {
     record("setting", { key: "theme", value: "system" }),
     record("setting", { key: "sessionTimeoutHours", value: 8 }),
     record("setting", { key: "catalogContentVersion", value: 4 }),
+    record("setting", { key: "learningExperienceVersion", value: 3 }),
     record("setting", { key: "version", value: "0.1.0" })
   );
 

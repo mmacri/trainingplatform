@@ -1,5 +1,5 @@
 import { addDays, subDays } from "date-fns";
-import type { AppData, PracticeActivity, ScenarioDefinition, Skill } from "./schema";
+import type { AppData, LearningResource, PracticeActivity, ScenarioDefinition, Skill } from "./schema";
 
 const demoNow = new Date("2026-09-09T16:00:00.000Z");
 
@@ -97,15 +97,33 @@ export function addLearningIntelligenceSeed(data: AppData) {
         scoringMode: "COMPETENCY",
         passingScore: 80,
         repeatable: true,
-        recommendationWeight: 1
+        recommendationWeight: 1,
+        supportModes: ["GUIDED", "STANDARD", "CHALLENGE"],
+        progressionTrackId: definition.skillIds[0],
+        progressionLevel: definition.activityType === "MICROLEARNING" ? "LEARN" : "PRACTICE"
       }));
+    } else {
+      const activity = data.practiceActivities.find((item) => item.id === definition.id);
+      if (activity) {
+        activity.supportModes = activity.supportModes ?? ["GUIDED", "STANDARD", "CHALLENGE"];
+        activity.progressionTrackId = activity.progressionTrackId ?? activity.skillIds[0];
+        activity.progressionLevel = activity.progressionLevel ?? (activity.activityType === "MICROLEARNING" ? "LEARN" : "PRACTICE");
+      }
     }
   });
 
   const scenarioDefs = buildScenarios();
   const existingScenarios = new Set(data.scenarioDefinitions.map((scenario) => scenario.id));
   scenarioDefs.forEach((scenario) => {
-    if (!existingScenarios.has(scenario.id)) data.scenarioDefinitions.push(stamp(scenario));
+    if (!existingScenarios.has(scenario.id)) {
+      data.scenarioDefinitions.push(stamp(scenario));
+    } else {
+      const existing = data.scenarioDefinitions.find((item) => item.id === scenario.id);
+      if (existing) {
+        existing.objectives = existing.objectives ?? scenario.objectives;
+        existing.workspaceType = existing.workspaceType ?? scenario.workspaceType;
+      }
+    }
   });
 
   const userByEmail = (email: string) => data.users.find((user) => user.email === email);
@@ -175,11 +193,91 @@ export function addLearningIntelligenceSeed(data: AppData) {
     }));
   }
 
+  addLearningExperience3Seed(data);
+
   if (!data.applicationSettings.some((setting) => setting.key === "learningIntelligenceVersion")) {
     data.applicationSettings.push(stamp({ id: "setting_learning_intelligence_version", key: "learningIntelligenceVersion", value: 1 }));
   }
+  const experienceSetting = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion");
+  if (experienceSetting) {
+    experienceSetting.value = 3;
+    experienceSetting.updatedAt = iso(demoNow);
+  } else {
+    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 3 }));
+  }
 
   return data;
+}
+
+function addLearningExperience3Seed(data: AppData) {
+  for (const course of data.courses) {
+    if (course.id === "course-cip007-system-security") {
+      course.relationships = course.relationships ?? { buildsOn: ["course-cip005-esp-access"], related: ["course-cip010-change-vulnerability"], recommendedNext: ["course-cip010-change-vulnerability"] };
+    } else if (course.id === "course-cip010-change-vulnerability") {
+      course.relationships = course.relationships ?? { buildsOn: ["course-cip007-system-security"], related: ["course-cip015-insm"], recommendedNext: ["course-cip015-insm"] };
+    } else if (course.id === "course-cip004-annual-refresher") {
+      course.relationships = course.relationships ?? { buildsOn: ["course-cip004-foundations"], related: ["course-cip004-supervisor-workshop"], recommendedNext: ["course-cip005-esp-access"] };
+    }
+    course.lastContentReviewAt = course.lastContentReviewAt ?? iso(subDays(demoNow, 120));
+    course.nextContentReviewAt = course.nextContentReviewAt ?? iso(addDays(demoNow, 245));
+  }
+
+  const resourceDefs = [
+    resource("resource-personnel-change-checklist", "Personnel Change Checklist", "Review training, electronic access, physical access, role membership, and evidence after a personnel event.", "CHECKLIST", ["course-cip004-annual-refresher", "course-cip004-supervisor-workshop"], ["skill-personnel-security", "skill-access-management"], ["Person and effective date", "Previous and new responsibilities", "Training review", "Electronic access review", "Physical access review", "Required changes and evidence"]),
+    resource("resource-remote-access-review", "Remote Access Review Guide", "A job aid for reviewing remote access authorization, scope, duration, approval, and closure.", "JOB_AID", ["course-cip005-esp-access", "course-cip013-supply-chain"], ["skill-electronic-access", "skill-access-management"], ["Requester and sponsor", "System and privilege", "Approved method", "Start and end", "Approval and closure"]),
+    resource("resource-system-security-checklist", "System Security Review Checklist", "Review ports, services, configuration, patches, accounts, malicious-code alerts, vulnerabilities, and evidence.", "CHECKLIST", ["course-cip007-system-security", "course-cip010-change-vulnerability"], ["skill-system-hardening", "skill-patch-management", "skill-account-management"], ["Ports and services", "Configuration baseline", "Patch evaluation", "Account ownership", "Vulnerability findings"]),
+    resource("resource-incident-capture-guide", "Incident Information Capture Guide", "Capture facts early without turning observations into unsupported conclusions.", "JOB_AID", ["course-cip008-incident-response", "course-cip015-insm"], ["skill-incident-recognition", "skill-incident-response"], ["Date and time", "System", "Account", "Observed behavior", "Known facts", "Actions taken", "People notified"]),
+    resource("resource-recovery-exercise-worksheet", "Recovery Exercise Worksheet", "Prepare, execute, validate, document, and remediate recovery exercise results.", "PROCESS_GUIDE", ["course-cip009-recovery-planning"], ["skill-recovery"], ["Plan version", "Scope", "Participants", "Dependencies", "Validation", "Issues", "Corrective actions"]),
+    resource("resource-change-evidence-checklist", "Configuration Change Evidence Checklist", "Assemble change records showing reason, review, approval, implementation, validation, and baseline update.", "EVIDENCE_TEMPLATE", ["course-cip010-change-vulnerability"], ["skill-configuration", "skill-evidence-quality"], ["Change ID", "System", "Risk or impact", "Approval", "Implementation", "Verification", "Baseline update"]),
+    resource("resource-information-handling-guide", "Information Handling Decision Guide", "Decide what information is, who needs it, where it can be stored, how it can be shared, and how it should be disposed.", "QUICK_REFERENCE", ["course-cip011-information-protection"], ["skill-information-protection"], ["Identify", "Need to know", "Storage", "Transmission", "Retention", "Disposal"]),
+    resource("resource-monitoring-coverage-review", "Monitoring Coverage Review", "Review network areas, visibility points, telemetry, ownership, blind spots, validation, and change review.", "CHECKLIST", ["course-cip015-insm"], ["skill-network-monitoring"], ["Network area", "Visibility point", "Telemetry", "Owner", "Blind spot", "Validation"]),
+    resource("resource-evidence-quality-rubric", "Evidence Quality Rubric", "Score traceability, completeness, consistency, relevance, readability, and authoritative source quality.", "EVIDENCE_TEMPLATE", ["course-audit-preparation", "course-cip003-security-management"], ["skill-evidence-quality", "skill-audit-readiness"], ["Traceable", "Complete", "Consistent", "Relevant", "Readable", "Authoritative"])
+  ];
+  const existingResources = new Set((data.learningResources ?? []).map((item) => item.id));
+  resourceDefs.forEach((definition) => {
+    if (!existingResources.has(definition.id)) data.learningResources.push(stamp(definition));
+  });
+
+  const userByEmail = (email: string) => data.users.find((user) => user.email === email);
+  const achievements = [
+    [userByEmail("learner@gridguard.local")?.id, "achievement-taylor-foundations", "NERC CIP Foundations Complete", "Completed core foundation training and practice."],
+    [userByEmail("jamie.rivera@gridguard.local")?.id, "achievement-jamie-first-scenario", "First Scenario Completed", "Completed a Scenario Lab exercise."],
+    [userByEmail("priya.shah@gridguard.local")?.id, "achievement-priya-audit", "Audit Readiness Workshop Complete", "Completed audit-readiness training and evidence review."]
+  ] as const;
+  achievements.forEach(([userId, achievementId, title, description]) => {
+    if (userId && !data.learnerAchievements.some((item) => item.id === achievementId)) {
+      data.learnerAchievements.push(stamp({ id: achievementId, userId, achievementType: achievementId.replace("achievement-", ""), title, description, earnedAt: iso(subDays(demoNow, 6)) }));
+    }
+  });
+
+  data.users.forEach((user) => {
+    if (!data.learningPreferences.some((item) => item.userId === user.id && item.key === "learningPreferences")) {
+      data.learningPreferences.push(stamp({
+        id: `learning-preferences-${user.id}`,
+        userId: user.id,
+        key: "learningPreferences",
+        value: { defaultSupportMode: "STANDARD", textSize: "STANDARD", reducedMotion: "SYSTEM", outlineMode: "EXPANDED", scenarioTheme: "SYSTEM" }
+      }));
+    }
+  });
+}
+
+function resource(id: string, title: string, description: string, type: LearningResource["type"], relatedCourseIds: string[], relatedSkillIds: string[], bullets: string[]): Omit<LearningResource, "createdAt" | "updatedAt"> {
+  return {
+    id,
+    title,
+    description,
+    type,
+    relatedCourseIds,
+    relatedSkillIds,
+    relatedStandardIds: [],
+    printable: true,
+    global: true,
+    contentBlocks: [
+      { id: `${id}-intro`, type: "paragraph", title: "Purpose", body: description, position: 1 },
+      { id: `${id}-items`, type: "checklist", title: "Review Items", body: bullets.map((item) => `- ${item}`).join("\n"), data: { items: bullets }, position: 2 }
+    ]
+  };
 }
 
 function buildScenarios(): Omit<ScenarioDefinition, "createdAt" | "updatedAt">[] {
@@ -195,6 +293,21 @@ function buildScenarios(): Omit<ScenarioDefinition, "createdAt" | "updatedAt">[]
     topicIds: skillIds,
     initialState: { status: "open" },
     repeatable: true,
+    objectives: [
+      { id: `${id}-objective-process`, label: "Choose a controlled process", skillId: skillIds[0], required: true },
+      { id: `${id}-objective-evidence`, label: "Retain useful evidence", skillId: skillIds[skillIds.length - 1], required: true }
+    ],
+    workspaceType: category.includes("System") || category.includes("Configuration")
+      ? "SYSTEM_CONSOLE" as const
+      : category.includes("Incident") || category.includes("Monitoring")
+        ? "INCIDENT_CONSOLE" as const
+        : category.includes("Recovery")
+          ? "RECOVERY_CONSOLE" as const
+          : category.includes("Supply")
+            ? "VENDOR_WORKSPACE" as const
+            : category.includes("Audit")
+              ? "AUDIT_WORKSPACE" as const
+              : "ACCESS_MANAGER" as const,
     resultRules: [
       { id: `${id}-strong`, result: "STRONG" as const, minRecommendedChoices: 2 },
       { id: `${id}-developing`, result: "DEVELOPING" as const, minRecommendedChoices: 1 }
@@ -254,6 +367,12 @@ function unexpectedAdminConnectionScenario(): Omit<ScenarioDefinition, "createdA
     topicIds: ["skill-incident-recognition", "skill-network-monitoring"],
     initialState: { time: "02:12", source: "ENG-WS-22", destination: "OPS-SRV-04", protocol: "administrative management", schedule: "none visible" },
     repeatable: true,
+    objectives: [
+      { id: "admin-objective-preserve", label: "Preserve known event details", skillId: "skill-incident-recognition", required: true },
+      { id: "admin-objective-verify", label: "Verify authorization before classification", skillId: "skill-network-monitoring", required: true },
+      { id: "admin-objective-escalate", label: "Escalate factual observations", skillId: "skill-incident-response", required: true }
+    ],
+    workspaceType: "INCIDENT_CONSOLE",
     variantPool: [{ asset: "OPS-SRV-04", source: "ENG-WS-22" }, { asset: "OPS-SRV-17", source: "ENG-LT-08" }],
     resultRules: [
       { id: "admin-strong", result: "STRONG", minRecommendedChoices: 3 },

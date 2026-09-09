@@ -4,7 +4,7 @@ import { tableNames } from "./schema";
 import { createSeedData } from "./seed";
 import { addLearningIntelligenceSeed } from "./learningIntelligenceSeed";
 
-export const schemaVersion = 4;
+export const schemaVersion = 5;
 
 const dexieStores = Object.fromEntries(
   tableNames.map((table) => [
@@ -29,6 +29,9 @@ export class GridGuardDB extends Dexie {
     });
     this.version(4).stores(dexieStores).upgrade(async (transaction) => {
       await transaction.table("applicationSettings").put({ id: "setting_schema_version", key: "schemaVersion", value: 4, createdAt: now(), updatedAt: now() });
+    });
+    this.version(5).stores(dexieStores).upgrade(async (transaction) => {
+      await transaction.table("applicationSettings").put({ id: "setting_schema_version", key: "schemaVersion", value: 5, createdAt: now(), updatedAt: now() });
     });
   }
 }
@@ -57,7 +60,8 @@ export async function initializeDatabase() {
   if (await isInitialized()) {
     const data = await getAllData();
     const version = data.applicationSettings.find((setting) => setting.key === "learningIntelligenceVersion")?.value;
-    if (version !== 1) {
+    const experienceVersion = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion")?.value;
+    if (version !== 1 || experienceVersion !== 3) {
       await replaceAllData(addLearningIntelligenceSeed(data));
     }
     return;

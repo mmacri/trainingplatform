@@ -1341,6 +1341,8 @@ export class WorkflowService {
       skillResults: [],
       overallResult: "DEVELOPING" as const,
       replayOfAttemptId,
+      supportMode: (this.data.learningPreferences.find((item) => item.userId === this.actorId && item.key === "learningPreferences")?.value as { defaultSupportMode?: "GUIDED" | "STANDARD" | "CHALLENGE" } | undefined)?.defaultSupportMode ?? "STANDARD",
+      simulationState: { activeTab: "Overview", flags: [], learnerActions: [], variables: {} },
       createdAt: now(),
       updatedAt: now()
     };
@@ -1375,6 +1377,95 @@ export class WorkflowService {
     attempt.updatedAt = now();
     await this.persist();
     return attempt;
+  }
+
+  async recordSimulationAction(attemptId: string, actionType: "INSPECT" | "FLAG" | "VERIFY" | "ESCALATE" | "PRESERVE" | "CLASSIFY" | "DOCUMENT" | "APPROVE" | "REJECT", targetId?: string) {
+    const attempt = this.data.branchingScenarioAttempts.find((item) => item.id === attemptId);
+    if (!attempt) throw new Error("Scenario attempt not found.");
+    attempt.simulationState = attempt.simulationState ?? { activeTab: "Overview", flags: [], learnerActions: [], variables: {} };
+    attempt.simulationState.learnerActions.push({ id: id("simaction"), actionType, targetId, timestamp: now() });
+    if (actionType === "FLAG" && targetId && !attempt.simulationState.flags.includes(targetId)) attempt.simulationState.flags.push(targetId);
+    if (actionType === "PRESERVE") attempt.currentState.evidencePreserved = true;
+    if (actionType === "VERIFY") attempt.currentState.verificationPerformed = true;
+    if (actionType === "ESCALATE") attempt.currentState.escalated = true;
+    attempt.updatedAt = now();
+    await this.persist();
+    return attempt;
+  }
+
+  async setScenarioSimulationTab(attemptId: string, activeTab: string, selectedRecordId?: string) {
+    const attempt = this.data.branchingScenarioAttempts.find((item) => item.id === attemptId);
+    if (!attempt) throw new Error("Scenario attempt not found.");
+    attempt.simulationState = attempt.simulationState ?? { activeTab: "Overview", flags: [], learnerActions: [], variables: {} };
+    attempt.simulationState.activeTab = activeTab;
+    attempt.simulationState.selectedRecordId = selectedRecordId;
+    attempt.updatedAt = now();
+    await this.persist();
+    return attempt;
+  }
+
+  async saveLearningSession(session: AppData["learningSessions"][number]) {
+    const existing = this.data.learningSessions.find((item) => item.id === session.id);
+    if (existing) Object.assign(existing, session, { updatedAt: now() });
+    else this.data.learningSessions.push(session);
+    await this.persist();
+    return session;
+  }
+
+  async completeLearningSessionItem(sessionId: string, targetId: string) {
+    const session = this.data.learningSessions.find((item) => item.id === sessionId);
+    if (!session) throw new Error("Learning session not found.");
+    const item = session.items.find((candidate) => candidate.targetId === targetId);
+    if (item && !item.completedAt) item.completedAt = now();
+    const next = session.items.find((candidate) => !candidate.completedAt);
+    session.currentItemId = next?.targetId;
+    if (!next) {
+      session.completedAt = now();
+      session.skillIds.forEach((skillId) => {
+        this.data.skillEvidence.push({ id: id("skillevidence"), userId: this.actorId, skillId, sourceType: "MICROLEARNING", sourceId: session.id, observedAt: now(), result: "STRONG", weight: 0.5, details: session.title, createdAt: now(), updatedAt: now() });
+      });
+      audit(this.data, this.actorId, "REINFORCEMENT_COMPLETED", "LearningSession", session.id, `Completed ${session.title}.`);
+    }
+    session.updatedAt = now();
+    await this.persist();
+    return session;
+  }
+
+  async saveLearningPreference(key: string, value: unknown) {
+    let preference = this.data.learningPreferences.find((item) => item.userId === this.actorId && item.key === key);
+    if (!preference) {
+      preference = { id: id("pref"), userId: this.actorId, key, value, createdAt: now(), updatedAt: now() };
+      this.data.learningPreferences.push(preference);
+    } else {
+      preference.value = value;
+      preference.updatedAt = now();
+    }
+    await this.persist();
+    return preference;
+  }
+
+  async recordContentFeedback(input: {
+    targetType: "COURSE" | "LESSON" | "PRACTICE" | "SCENARIO" | "RESOURCE";
+    targetId: string;
+    courseId?: string;
+    courseVersionId?: string;
+    lessonId?: string;
+    activityId?: string;
+    usefulness?: "VERY_USEFUL" | "USEFUL" | "SOMEWHAT_USEFUL" | "NOT_USEFUL";
+    issueType?: "CONFUSING" | "OUTDATED" | "BROKEN";
+    comment?: string;
+  }) {
+    this.data.contentFeedbackItems.push({
+      id: id("feedback"),
+      userId: this.actorId,
+      feedbackType: input.issueType === "BROKEN" ? "BROKEN_ACTIVITY" : input.issueType ?? "HELPFUL",
+      status: "OPEN",
+      createdAt: now(),
+      updatedAt: now(),
+      ...input
+    });
+    audit(this.data, this.actorId, "CONTENT_FEEDBACK_CREATED", input.targetType, input.targetId, "Submitted learning content feedback.");
+    await this.persist();
   }
 
   async createLearnerFollowUp(input: { title: string; description?: string; sourceType: "COURSE" | "SCENARIO" | "PRACTICE" | "MANUAL"; sourceId?: string; dueAt?: string; visibility?: "PRIVATE" | "SHARED_WITH_MANAGER" }) {

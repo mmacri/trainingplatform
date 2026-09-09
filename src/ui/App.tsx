@@ -28,7 +28,7 @@ import {
   X
 } from "lucide-react";
 import { type FormEvent, useEffect, useMemo, useState } from "react";
-import { Link, Navigate, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { addDays, formatDistanceToNow } from "date-fns";
 import type { AppData, ContentBlock, Course, CourseVersion, Question, Role, User } from "../data/schema";
@@ -54,6 +54,11 @@ import {
   hasAnyRole,
   searchAuthorized
 } from "../services/appServices";
+import { ContentHealthService } from "../services/contentHealthService";
+import { LearnerJourneyService, type LearnerJourneyAction } from "../services/learnerJourneyService";
+import { LearningSearchService } from "../services/learningSearchService";
+import { LearningSessionService } from "../services/learningSessionService";
+import { SkillCompetencyService } from "../services/skillMasteryService";
 import { AppContext, type Toast, useApp } from "./appContext";
 import { AssignmentWizard, CourseCreationWizard, CourseManagementDashboard, CourseWorkspace } from "./course-management/CourseManagement";
 
@@ -264,6 +269,11 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
   const [switchOpen, setSwitchOpen] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [notesOpen, setNotesOpen] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(() => {
+    const pref = data.learningPreferences.find((item) => item.userId === user.id && item.key === "learningPreferences")?.value as { onboardingCompletedAt?: string } | undefined;
+    const learnerOnly = roles.includes("LEARNER") && !hasAnyRole(data, user.id, ["MANAGER", "AUTHOR", "COURSE_OWNER", "REVIEWER", "COMPLIANCE_MANAGER", "LEARNING_ADMIN", "PLATFORM_ADMIN"]);
+    return learnerOnly && !pref?.onboardingCompletedAt;
+  });
   const nav = buildNav(data, user.id);
   const unread = data.notifications.filter((note) => note.userId === user.id && !note.readAt).length;
 
@@ -331,6 +341,10 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
           <Routes>
             <Route path="/" element={<Navigate to="/home" replace />} />
             <Route path="/home" element={<HomeDashboard />} />
+            <Route path="/learn-home" element={<LearnHome />} />
+            <Route path="/progress" element={<ProgressHome />} />
+            <Route path="/session" element={<LearningSessionPage />} />
+            <Route path="/review" element={<ReviewMistakesPage />} />
             <Route path="/my-learning" element={<MyLearning />} />
             <Route path="/practice" element={<PracticeCenter />} />
             <Route path="/practice/:activityId" element={<PracticeActivityPage />} />
@@ -348,9 +362,11 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/refresher/:activityId" element={<PracticeActivityPage />} />
             <Route path="/follow-ups" element={<FollowUpsPage />} />
             <Route path="/learning-map" element={<LearningMapPage />} />
+            <Route path="/settings/learning" element={<LearningSettingsPage />} />
             <Route path="/campaigns/:campaignId" element={<CampaignLearnerPage />} />
             <Route path="/courses/:courseId" element={<CourseLanding />} />
             <Route path="/learn/:courseId/:lessonId?" element={<CoursePlayer />} />
+            <Route path="/resources" element={<ResourceCenter />} />
             <Route path="/resources/:resourceId" element={<ResourceDetail />} />
             <Route path="/records/:courseId" element={<TrainingRecord />} />
             <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
@@ -361,11 +377,13 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/build/courses/:courseId" element={<CourseWorkspace />} />
             <Route path="/build/courses/:courseId/assign" element={<Guard allow={canManageCourses(data, user.id)} label="Assign Training"><AssignmentWizard /></Guard>} />
             <Route path="/team" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Team Learning"><TeamDashboard /></Guard>} />
+            <Route path="/team/operations" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Learning Operations"><ManagerOperationsHome /></Guard>} />
             <Route path="/team/coaching" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Coaching"><ManagerCoaching /></Guard>} />
             <Route path="/team/campaigns" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Campaigns"><ManagerCampaigns /></Guard>} />
             <Route path="/team/challenges" element={<Guard allow={roles.includes("MANAGER") || canManageUsers(data, user.id)} label="Challenges"><ManagerCoaching /></Guard>} />
             <Route path="/compliance" element={<Guard allow={canViewCompliance(data, user.id)} label="Compliance"><ComplianceDashboard /></Guard>} />
             <Route path="/standards" element={<Guard allow={canViewCompliance(data, user.id) || roles.includes("LEARNER")} label="Standards"><StandardsPage /></Guard>} />
+            <Route path="/standards/:standardId/impact" element={<Guard allow={canViewCompliance(data, user.id) || canManageCourses(data, user.id)} label="Standard Impact"><StandardImpactPage /></Guard>} />
             <Route path="/evidence" element={<Guard allow={canViewEvidence(data, user.id)} label="Evidence"><EvidencePage /></Guard>} />
             <Route path="/reports" element={<Guard allow={canViewEvidence(data, user.id)} label="Reports"><ReportsPage /></Guard>} />
             <Route path="/admin" element={<Guard allow={canManageUsers(data, user.id)} label="Administration"><AdminHome /></Guard>} />
@@ -383,6 +401,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
       {switchOpen ? <DemoSwitcher onClose={() => setSwitchOpen(false)} onSwitch={async (userId) => { const result = await AuthService.switchUser(userId); onSwitch(result.session.userId); await refresh(); setSwitchOpen(false); toast("Demo user switched"); }} onLogout={logout} /> : null}
       {searchOpen ? <SearchDialog onClose={() => setSearchOpen(false)} /> : null}
       {notesOpen ? <NotesDrawer onClose={() => setNotesOpen(false)} /> : null}
+      {onboardingOpen ? <LearnerOnboarding onClose={async () => { const svc = new WorkflowService(data, user.id); const current = (data.learningPreferences.find((item) => item.userId === user.id && item.key === "learningPreferences")?.value as Record<string, unknown> | undefined) ?? {}; await svc.saveLearningPreference("learningPreferences", { ...current, onboardingCompletedAt: new Date().toISOString() }); await refresh(); setOnboardingOpen(false); }} /> : null}
     </div>
   );
 }
@@ -391,12 +410,10 @@ function buildNav(data: AppData, userId: string) {
   const learnerOnly = !hasAnyRole(data, userId, ["MANAGER", "AUTHOR", "COURSE_OWNER", "REVIEWER", "COMPLIANCE_MANAGER", "LEARNING_ADMIN", "PLATFORM_ADMIN"]);
   const items = learnerOnly ? [
     { label: "Home", href: "/home", icon: Home },
-    { label: "My Learning", href: "/my-learning", icon: GraduationCap },
+    { label: "Learn", href: "/learn-home", icon: GraduationCap },
+    { label: "My Learning", href: "/my-learning", icon: BookOpenCheck },
     { label: "Practice", href: "/practice", icon: ClipboardCheck },
-    { label: "Scenario Lab", href: "/scenarios", icon: ShieldCheck },
-    { label: "Skills", href: "/skills", icon: CheckCircle2 },
-    { label: "Learning Paths", href: "/learning-paths", icon: BookOpenCheck },
-    { label: "Certificates", href: "/certifications", icon: FileCheck2 }
+    { label: "Progress", href: "/progress", icon: CheckCircle2 }
   ] : [
     { label: "Home", href: "/home", icon: Home },
     { label: "My Learning", href: "/my-learning", icon: GraduationCap },
@@ -482,18 +499,20 @@ function titleize(value: string) {
 }
 
 function HomeDashboard() {
+  const { data, user, roles } = useApp();
+  if (canManageUsers(data, user.id)) return <AdminRoleHome />;
+  if (canViewCompliance(data, user.id) && !roles.includes("MANAGER")) return <ComplianceRoleHome />;
+  if (roles.includes("AUTHOR") && !roles.includes("MANAGER")) return <AuthorRoleHome />;
+  if (roles.includes("MANAGER")) return <ManagerOperationsHome />;
+  return <LearnerJourneyHome />;
+}
+
+function LearnerJourneyHome() {
   const { data, user } = useApp();
   const enrollments = data.enrollments.filter((item) => item.userId === user.id);
-  const assigned = enrollments.length;
-  const completed = enrollments.filter((item) => item.status === "COMPLETED").length;
-  const inProgress = enrollments.filter((item) => item.status === "IN_PROGRESS").length;
-  const certs = data.userCertifications.filter((item) => item.userId === user.id).length;
+  const journey = LearnerJourneyService.getLearnerJourney(data, user.id);
+  const next = journey.primaryAction;
   const required = enrollments.map((enrollment) => data.courses.find((course) => course.id === enrollment.courseId)!).filter(Boolean);
-  const recommendations = LearningRecommendationService.getRecommendations(data, user.id);
-  const next = recommendations[0];
-  const practice = recommendations.find((item) => item.recommendationType === "PRACTICE_ACTIVITY" || item.recommendationType === "REFRESHER");
-  const fresh = recommendations.find((item) => item.reasonCode === "REINFORCEMENT_DUE");
-  const mastery = SkillMasteryService.getSkillMastery(data, user.id).filter((skill) => skill.evidenceCount).slice(0, 4);
   const dueSoon = enrollments
     .map((enrollment) => ({ enrollment, assignment: data.assignments.find((assignment) => assignment.id === enrollment.assignmentId), course: data.courses.find((course) => course.id === enrollment.courseId) }))
     .filter((item) => item.assignment && item.course && item.enrollment.status !== "COMPLETED")
@@ -502,37 +521,39 @@ function HomeDashboard() {
 
   return (
     <>
-      <PageHeader title={`Good afternoon, ${user.firstName}`} subtitle="Recommended next actions, practice, skills, and required learning." />
-      {next ? <Panel className="mb-5 border-cyan-200 bg-cyan-50/60 dark:border-cyan-900 dark:bg-cyan-950/40"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Recommended Next</p><div className="mt-2 flex flex-wrap items-center justify-between gap-4"><div><h2 className="text-2xl font-semibold">{next.title}</h2><p className="mt-1 text-sm text-muted-foreground">{next.reason}</p></div><Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={next.href}>{next.recommendationType === "CONTINUE_COURSE" ? "Resume" : "Start"}</Link></div></Panel> : null}
-      <div className="grid gap-4 md:grid-cols-4">
-        <Stat label="Assigned Training" value={assigned} />
-        <Stat label="In Progress" value={inProgress} />
-        <Stat label="Completed" value={completed} />
-        <Stat label="Certifications" value={certs} />
-      </div>
+      <PageHeader title={`Welcome, ${user.firstName}`} subtitle="GridGuard recommends the next useful step across courses, practice, scenarios, and skills." action={<Link className="rounded-md border border-border px-3 py-2 text-sm" to="/settings/learning">Learning Settings</Link>} />
+      {next ? <JourneyPrimaryCard action={next} /> : <EmptyState text="You're caught up. No required training is currently due." action="Start 15-Minute Session" href="/session" />}
       <div className="mt-5 grid gap-5 xl:grid-cols-[1fr_360px]">
         <div className="space-y-5">
-        {dueSoon.length ? <Panel><h2 className="text-lg font-semibold">Due Soon</h2><div className="mt-3 space-y-2">{dueSoon.map(({ assignment, course }) => <Link key={assignment!.id} className="flex justify-between rounded-md border border-border p-3 text-sm" to={`/courses/${course!.id}`}><span>{course!.shortTitle ?? course!.title}</span><span className="text-muted-foreground">{new Date(assignment!.dueAt).toLocaleDateString()}</span></Link>)}</div></Panel> : null}
-        {fresh ? <Panel><p className="text-sm font-semibold text-cyan-700">Keep It Fresh</p><h2 className="mt-2 text-lg font-semibold">{fresh.title}</h2><p className="mt-1 text-sm text-muted-foreground">{fresh.reason}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={fresh.href}>Start Reinforcement</Link></Panel> : null}
-        {practice ? <Panel><p className="text-sm font-semibold text-cyan-700">Practice Recommendation</p><h2 className="mt-2 text-lg font-semibold">{practice.title}</h2><p className="mt-1 text-sm text-muted-foreground">{practice.reason}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={practice.href}>Start Challenge</Link></Panel> : null}
-        <Panel>
-          <h2 className="text-lg font-semibold">My Learning</h2>
-          <div className="mt-3 space-y-3">
-            {required.filter((course) => data.enrollments.some((enrollment) => enrollment.courseId === course.id && enrollment.status !== "COMPLETED")).map((course) => <CourseRow key={course.id} course={course} />)}
-            {required.length === 0 ? <EmptyState text="You're caught up on required training." action="Explore Practice" href="/practice" /> : null}
-          </div>
-        </Panel>
+          {journey.upcomingActions.length ? <Panel><h2 className="text-lg font-semibold">Up Next</h2><div className="mt-3 divide-y divide-border">{journey.upcomingActions.slice(0, 4).map((action, index) => <JourneyRow key={action.id} action={action} index={index + 1} />)}</div></Panel> : null}
+          {dueSoon.length ? <Panel><h2 className="text-lg font-semibold">Due Soon</h2><div className="mt-3 space-y-2">{dueSoon.map(({ assignment, course }) => <Link key={assignment!.id} className="flex justify-between rounded-md border border-border p-3 text-sm" to={`/courses/${course!.id}`}><span>{course!.shortTitle ?? course!.title}</span><span className="text-muted-foreground">{new Date(assignment!.dueAt).toLocaleDateString()}</span></Link>)}</div></Panel> : null}
+          {journey.reinforcementActions.length ? <Panel><p className="text-sm font-semibold text-cyan-700">Keep It Fresh</p><div className="mt-3 space-y-2">{journey.reinforcementActions.map((action) => <JourneyRow key={action.id} action={action} />)}</div></Panel> : null}
+          {journey.resumeItems.length ? <Panel><h2 className="text-lg font-semibold">Continue Where You Left Off</h2><div className="mt-3 space-y-2">{journey.resumeItems.slice(0, 3).map((item) => <Link key={item.id} className="block rounded-md border border-border p-3 text-sm" to={item.href}><span className="font-medium">{item.title}</span><span className="block text-muted-foreground">{item.subtitle} · {item.progressText}</span></Link>)}</div></Panel> : null}
+          <Panel>
+            <h2 className="text-lg font-semibold">My Learning</h2>
+            <div className="mt-3 space-y-3">
+              {required.filter((course) => data.enrollments.some((enrollment) => enrollment.courseId === course.id && enrollment.status !== "COMPLETED")).slice(0, 4).map((course) => <CourseRow key={course.id} course={course} />)}
+              {required.length === 0 ? <EmptyState text="You're caught up on required training." action="Explore Practice" href="/practice" /> : null}
+            </div>
+          </Panel>
         </div>
         <div className="space-y-5">
-          {hasAnyRole(data, user.id, ["MANAGER", "PLATFORM_ADMIN"]) ? <ManagerMini /> : null}
-          {canViewCompliance(data, user.id) ? <ComplianceMini /> : null}
-          <Panel><h2 className="text-lg font-semibold">Learning Paths</h2><div className="mt-3 space-y-2">{data.learningPaths.slice(0, 3).map((path) => <Link key={path.id} className="block rounded-md border border-border p-3 text-sm" to="/learning-paths">{path.title}</Link>)}</div></Panel>
-          <Panel><h2 className="text-lg font-semibold">Skills</h2><div className="mt-3 space-y-2">{mastery.map((skill) => <Link key={skill.skillId} className="flex justify-between rounded-md border border-border p-3 text-sm" to={`/skills/${skill.skillId}`}><span>{skill.title}</span><span className="text-muted-foreground">{skill.state.replaceAll("_", " ")}</span></Link>)}</div>{!mastery.length ? <p className="mt-2 text-sm text-muted-foreground">Complete practice or scenarios to build skill evidence.</p> : null}</Panel>
-          <Panel><h2 className="text-lg font-semibold">Recent Achievements</h2><div className="mt-3 space-y-2 text-sm"><div className="rounded-md border border-border p-3">CIP Foundations Complete</div><div className="rounded-md border border-border p-3">First Scenario Completed</div></div></Panel>
+          <Panel><h2 className="text-lg font-semibold">Start a Learning Session</h2><p className="mt-2 text-sm text-muted-foreground">Build a short sequence from your reinforcement, practice, and scenario recommendations.</p><Link className="mt-3 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/session">Start 15-Minute Session</Link></Panel>
+          {journey.activeLearningPath ? <Panel><h2 className="text-lg font-semibold">Active Path</h2><p className="mt-2 font-medium">{journey.activeLearningPath.title}</p><p className="mt-1 text-sm text-muted-foreground">{journey.activeLearningPath.progress}% complete</p><Link className="mt-3 inline-flex text-sm font-medium text-cyan-700" to={journey.activeLearningPath.href}>View Path</Link></Panel> : null}
+          <Panel><h2 className="text-lg font-semibold">Your Development</h2><div className="mt-3 space-y-2">{journey.skillFocus.map((skill) => <Link key={skill.skillId} className="flex justify-between rounded-md border border-border p-3 text-sm" to={skill.href}><span>{skill.title}</span><span className="text-muted-foreground">{skill.state.replaceAll("_", " ")} · {skill.stage}</span></Link>)}</div>{!journey.skillFocus.length ? <p className="mt-2 text-sm text-muted-foreground">Your skills will appear as you complete courses, practice, and scenarios.</p> : null}<Link className="mt-3 inline-flex text-sm font-medium text-cyan-700" to="/skills">View All Skills</Link></Panel>
+          <Panel><h2 className="text-lg font-semibold">Recent Progress</h2><div className="mt-3 space-y-2 text-sm">{journey.recentAchievements.map((achievement) => <div key={achievement.id} className="rounded-md border border-border p-3"><p className="font-medium">{achievement.title}</p><p className="text-muted-foreground">{achievement.description}</p></div>)}{!journey.recentAchievements.length ? <p className="text-muted-foreground">Complete learning activities to build your progress timeline.</p> : null}</div></Panel>
         </div>
       </div>
     </>
   );
+}
+
+function JourneyPrimaryCard({ action }: { action: LearnerJourneyAction }) {
+  return <Panel className="mb-5 border-cyan-200 bg-cyan-50/70 dark:border-cyan-900 dark:bg-cyan-950/40"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Your Next Step</p><div className="mt-3 flex flex-wrap items-end justify-between gap-4"><div><h2 className="text-2xl font-semibold">{action.title}</h2>{action.subtitle ? <p className="mt-1 text-sm text-muted-foreground">{action.subtitle}</p> : null}<p className="mt-2 text-sm font-medium">{action.reasonText}</p>{action.estimatedMinutes ? <p className="mt-1 text-xs text-muted-foreground">{action.estimatedMinutes} min</p> : null}</div><Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={action.href}>{action.reason === "IN_PROGRESS" ? "Resume Learning" : "Start"}</Link></div></Panel>;
+}
+
+function JourneyRow({ action, index }: { action: LearnerJourneyAction; index?: number }) {
+  return <Link className="flex items-center justify-between gap-3 py-3 text-sm" to={action.href}><span className="flex min-w-0 gap-3">{index ? <span className="text-muted-foreground">{index}</span> : null}<span><span className="block font-medium">{action.title}</span><span className="block text-muted-foreground">{action.reasonText}{action.estimatedMinutes ? ` · ${action.estimatedMinutes} min` : ""}</span></span></span><ChevronRight size={17} /></Link>;
 }
 
 function ManagerMini() {
@@ -546,6 +567,31 @@ function ManagerMini() {
 function ComplianceMini() {
   const { data } = useApp();
   return <Panel><h2 className="text-lg font-semibold">Compliance Readiness</h2><p className="mt-2 text-sm text-muted-foreground">{data.evidenceRecords.length} evidence records and {data.standardChangeReviews.length} standard changes tracked.</p><Link to="/compliance" className="mt-3 inline-flex text-sm font-medium text-cyan-700">Open Compliance Dashboard</Link></Panel>;
+}
+
+function ManagerOperationsHome() {
+  const { data, user } = useApp();
+  const teams = data.teams.filter((team) => canViewTeam(data, user.id, team.id));
+  const memberIds = data.teamMembers.filter((member) => teams.some((team) => team.id === member.teamId)).map((member) => member.userId);
+  const opportunities = getCoachingOpportunities(data, user.id);
+  const overdue = data.enrollments.filter((item) => memberIds.includes(item.userId) && item.status === "OVERDUE").length;
+  const campaigns = data.learningCampaigns.filter((campaign) => campaign.createdByUserId === user.id || campaign.status === "ACTIVE");
+  return <><PageHeader title="Learning Operations" subtitle="Needs attention, team progress, coaching, campaigns, expirations, and skill development." /><div className="grid gap-4 md:grid-cols-4"><Stat label="Overdue Assignments" value={overdue} tone={overdue ? "amber" : "cyan"} /><Stat label="Coaching Opportunities" value={opportunities.length} /><Stat label="Active Campaigns" value={campaigns.length} /><Stat label="Team Members" value={memberIds.length} /></div><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_360px]"><Panel><h2 className="font-semibold">Needs Attention</h2><div className="mt-3 space-y-2 text-sm">{opportunities.slice(0, 4).map((item) => { const learner = data.users.find((candidate) => candidate.id === item.userId); const skill = data.skills.find((candidate) => candidate.id === item.skillId); return <div key={`${item.userId}-${item.skillId}`} className="rounded-md border border-border p-3"><p className="font-medium">{learner?.name}</p><p className="text-muted-foreground">{skill?.name} is {item.priority === "HIGH" ? "needs review" : "developing"}. Suggested: assign targeted practice.</p></div>; })}{!opportunities.length ? <p className="text-muted-foreground">No coaching opportunities require attention.</p> : null}</div><Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/team/coaching">Open Coaching</Link></Panel><Panel><h2 className="font-semibold">Team Skills</h2>{["skill-patch-management", "skill-access-management", "skill-evidence-quality"].map((skillId) => { const skill = data.skills.find((item) => item.id === skillId); const states = memberIds.map((idValue) => SkillMasteryService.getSkillMastery(data, idValue).find((item) => item.skillId === skillId)?.state ?? "NEEDS_REVIEW"); return <div key={skillId} className="mt-3 rounded-md border border-border p-3 text-sm"><p className="font-medium">{skill?.name}</p><p className="text-muted-foreground">Strong {states.filter((state) => state === "STRONG").length} · Developing {states.filter((state) => state === "DEVELOPING").length} · Needs Review {states.filter((state) => state === "NEEDS_REVIEW").length}</p></div>; })}</Panel></div><div className="mt-5 grid gap-4 lg:grid-cols-2"><Panel><h2 className="font-semibold">Campaigns</h2>{campaigns.map((campaign) => <Link key={campaign.id} className="mt-3 block rounded-md border border-border p-3 text-sm" to="/team/campaigns">{campaign.title}<span className="block text-muted-foreground">{campaign.items.length} learning items</span></Link>)}</Panel><Panel><h2 className="font-semibold">Actionable Analytics</h2><p className="mt-2 text-sm text-muted-foreground">Patch Management has visible developing evidence for parts of the Operations team.</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to="/team/coaching">Assign Patch Practice</Link></Panel></div></>;
+}
+
+function AuthorRoleHome() {
+  const { data } = useApp();
+  const health = data.courses.slice(0, 6).map((course) => ({ course, health: ContentHealthService.getCourseHealth(data, course.id) }));
+  return <><PageHeader title="Content Operations" subtitle="Courses needing attention, reviews, feedback, question insights, content health, and standards impact." /><div className="grid gap-4 lg:grid-cols-2">{health.map(({ course, health: state }) => <Panel key={course.id}><h2 className="font-semibold">{course.title}</h2><p className="mt-1 text-sm text-muted-foreground">Content Health: {state.state}</p><p className="mt-2 text-sm">{state.signals.join(", ") || "No active signals."}</p><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to={`/build/courses/${course.id}`}>Open Course</Link></Panel>)}</div></>;
+}
+
+function ComplianceRoleHome() {
+  const { data } = useApp();
+  return <><PageHeader title="Compliance Learning Readiness" subtitle="Assignment completion, evidence records, standards change reviews, certifications, and training gaps." /><div className="grid gap-4 md:grid-cols-4"><Stat label="Evidence Records" value={data.evidenceRecords.length} /><Stat label="Standards Reviews" value={data.standardChangeReviews.length} /><Stat label="Overdue" value={data.enrollments.filter((item) => item.status === "OVERDUE").length} /><Stat label="Certificates" value={data.userCertifications.length} /></div><div className="mt-5 grid gap-5 lg:grid-cols-2"><ComplianceMini /><Panel><h2 className="font-semibold">Standard Impact Reviews</h2>{data.standardChangeReviews.map((review) => <Link key={review.id} className="mt-3 block rounded-md border border-border p-3 text-sm" to={`/standards/${review.standardId}/impact`}>{review.summary}<span className="block text-muted-foreground">{review.status}</span></Link>)}</Panel></div></>;
+}
+
+function AdminRoleHome() {
+  return <><PageHeader title="Platform Administration" subtitle="Users, roles, data health, backup, demo data, and application settings." /><AdminHome /></>;
 }
 
 function CourseRow({ course }: { course: Course }) {
@@ -581,6 +627,22 @@ function MyLearning() {
       {!filtered.length ? <EmptyState text="You're all caught up." action="Browse Catalog" href="/learning" /> : null}
     </>
   );
+}
+
+function LearnHome() {
+  const { data, user } = useApp();
+  return <><PageHeader title="Learn" subtitle="Assigned learning, catalog courses, learning paths, and resources." /><Tabs items={["My Learning", "Catalog", "Learning Paths", "Resources"]} active="My Learning" onChange={(value) => { if (value === "Catalog") location.hash = "#/learning"; else if (value === "Learning Paths") location.hash = "#/learning-paths"; else if (value === "Resources") location.hash = "#/resources"; }} /><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="text-lg font-semibold">Assigned Learning</h2><div className="mt-3 space-y-3">{data.enrollments.filter((item) => item.userId === user.id && item.status !== "COMPLETED").map((enrollment) => { const course = data.courses.find((item) => item.id === enrollment.courseId); return course ? <CourseRow key={enrollment.id} course={course} /> : null; })}</div></Panel><Panel><h2 className="text-lg font-semibold">Learning Resources</h2><div className="mt-3 space-y-2">{data.learningResources.slice(0, 5).map((resource) => <Link key={resource.id} className="block rounded-md border border-border p-3 text-sm" to={`/resources/${resource.id}`}>{resource.title}<span className="block text-xs text-muted-foreground">{resource.type.replaceAll("_", " ")}</span></Link>)}</div></Panel></div></>;
+}
+
+function ProgressHome() {
+  const { data, user } = useApp();
+  const [tab, setTab] = useState("Skills");
+  const activity = [
+    ...data.practiceAttempts.filter((item) => item.userId === user.id && item.completedAt).map((item) => ({ date: item.completedAt!, label: data.practiceActivities.find((activity) => activity.id === item.practiceActivityId)?.title ?? "Practice", type: "Practice Completed", result: item.topicResults[0]?.result })),
+    ...data.branchingScenarioAttempts.filter((item) => item.userId === user.id && item.completedAt).map((item) => ({ date: item.completedAt!, label: data.scenarioDefinitions.find((scenario) => scenario.id === item.scenarioId)?.title ?? "Scenario", type: "Scenario Completed", result: item.overallResult })),
+    ...data.userCertifications.filter((item) => item.userId === user.id).map((item) => ({ date: item.issuedAt, label: data.certifications.find((cert) => cert.id === item.certificationId)?.name ?? "Certificate", type: "Certificate Earned", result: "ACTIVE" }))
+  ].sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime());
+  return <><PageHeader title="Progress" subtitle="Skills, certificates, transcript, activity, and achievements." /><Tabs items={["Skills", "Certificates", "Transcript", "Activity", "Achievements"]} active={tab} onChange={setTab} />{tab === "Skills" ? <div className="mt-4"><SkillsPage /></div> : null}{tab === "Certificates" ? <div className="mt-4"><Certifications /></div> : null}{tab === "Transcript" ? <TranscriptPanel /> : null}{tab === "Activity" ? <Panel className="mt-4"><div className="space-y-2">{activity.map((item) => <div key={`${item.type}-${item.label}-${item.date}`} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{item.label}</p><p className="text-muted-foreground">{item.type} · {String(item.result).replaceAll("_", " ")} · {new Date(item.date).toLocaleDateString()}</p></div>)}{!activity.length ? <p className="text-sm text-muted-foreground">Meaningful learning activity will appear here.</p> : null}</div></Panel> : null}{tab === "Achievements" ? <Panel className="mt-4"><div className="grid gap-3 md:grid-cols-2">{data.learnerAchievements.filter((item) => item.userId === user.id).map((achievement) => <div key={achievement.id} className="rounded-md border border-border p-3"><p className="font-medium">{achievement.title}</p><p className="text-sm text-muted-foreground">{achievement.description}</p></div>)}</div></Panel> : null}</>;
 }
 
 function LibraryPage() {
@@ -846,6 +908,7 @@ function CoursePlayer() {
   const [outlineOpen, setOutlineOpen] = useState(() => window.innerWidth >= 1024);
   const [notesOpen, setNotesOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
+  const [coachOpen, setCoachOpen] = useState(false);
   const course = data.courses.find((item) => item.id === courseId);
   if (!course) return <NotFound />;
   const access = canAccessCourse(data, user.id, course.id);
@@ -907,6 +970,7 @@ function CoursePlayer() {
           </div>
           <div className="flex flex-wrap gap-2">
             <button aria-label="Bookmark lesson" className="rounded-md border border-border px-3 py-2 text-sm" onClick={toggleBookmark}>{bookmarked ? "Saved" : "Save"}</button>
+            <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setCoachOpen(true)}>Coach</button>
             <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setNotesOpen(true)}>Notes</button>
             <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setResourcesOpen(true)}>Resources</button>
             <button className="hidden rounded-md border border-border px-3 py-2 text-sm lg:inline-flex" onClick={() => setOutlineOpen((value) => !value)}>{outlineOpen ? "Hide Outline" : "Show Outline"}</button>
@@ -938,15 +1002,32 @@ function CoursePlayer() {
         </div>
       </div>
       {notesOpen ? <LearningDrawer title="Notes" onClose={() => setNotesOpen(false)}><textarea className="min-h-64 w-full rounded-md border border-border bg-transparent p-3 text-sm" placeholder="Write a private note..." value={note} onChange={(event) => void saveNote(event.target.value)} /><p className="mt-3 text-xs text-muted-foreground">Private note for {lesson.title}</p></LearningDrawer> : null}
+      {coachOpen ? <LearningDrawer title="Learning Coach" onClose={() => setCoachOpen(false)}><LearningCoach lesson={lesson} course={course} /></LearningDrawer> : null}
       {resourcesOpen ? <LearningDrawer title="Resources" onClose={() => setResourcesOpen(false)}><div className="space-y-2">{resources.map((resource) => resource.url?.startsWith("http") ? <a key={resource.id} className="block rounded-md border border-border p-3 text-sm" href={resource.url} target="_blank" rel="noreferrer"><FileText size={15} className="mr-2 inline" />{resource.title}<p className="mt-1 text-xs text-muted-foreground">{resource.description}</p></a> : <Link key={resource.id} className="block rounded-md border border-border p-3 text-sm" to={`/resources/${resource.id}`}><FileText size={15} className="mr-2 inline" />{resource.title}<p className="mt-1 text-xs text-muted-foreground">{resource.description}</p></Link>)}</div></LearningDrawer> : null}
     </div>
   );
 }
 
+function LearningCoach({ lesson, course }: { lesson: AppData["lessons"][number]; course: Course }) {
+  const lower = `${lesson.title} ${course.title}`.toLowerCase();
+  const guidance = lower.includes("patch")
+    ? "Applicability and implementation are separate decisions. Use the approved process to evaluate operational constraints before acting."
+    : lower.includes("evidence") || lower.includes("audit")
+      ? "A useful record helps another reviewer reconstruct who acted, what happened, when, the result, and why it connects to the process."
+      : lower.includes("access") || lower.includes("role")
+        ? "Access should reflect current responsibilities and approved need. A role change is a trigger to review, not a reason to assume access is still appropriate."
+        : lower.includes("incident") || lower.includes("monitor")
+          ? "Separate known facts from assumptions. Preserve useful context and escalate through the approved response path."
+          : "Use the lesson objective to decide what action, record, or escalation would be appropriate in a real operational setting.";
+  return <div><p className="text-sm text-muted-foreground">You're working on {lesson.title}.</p><div className="mt-4 rounded-md border border-cyan-200 bg-cyan-50 p-4 text-sm dark:border-cyan-900 dark:bg-cyan-950"><p className="font-semibold">Remember</p><p className="mt-2 text-muted-foreground">{guidance}</p></div><div className="mt-4 grid gap-2"><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/review">Review Related Patterns</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/practice">Practice This Skill</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/resources">Open Resources</Link></div></div>;
+}
+
 function ResourceDetail() {
   const { resourceId } = useParams();
   const { data } = useApp();
+  const globalResource = data.learningResources.find((item) => item.id === resourceId);
   const resource = data.courseResources.find((item) => item.id === resourceId);
+  if (globalResource) return <GlobalResourceDetail resource={globalResource} />;
   if (!resource) return <NotFound />;
   const course = data.courses.find((item) => item.id === resource.courseId);
   const standard = course?.subcategory ?? "NERC CIP";
@@ -967,6 +1048,65 @@ function ResourceDetail() {
       </Panel>
     </>
   );
+}
+
+function ResourceCenter() {
+  const { data } = useApp();
+  const [query, setQuery] = useState("");
+  const [type, setType] = useState("All");
+  const resources = data.learningResources.filter((resource) => (type === "All" || resource.type === type) && (!query || [resource.title, resource.description, resource.type].join(" ").toLowerCase().includes(query.toLowerCase())));
+  const types = Array.from(new Set(data.learningResources.map((resource) => resource.type)));
+  return <><PageHeader title="Resources" subtitle="Quick references, checklists, job aids, process guides, evidence templates, glossary, and standards references." /><Panel><div className="flex flex-wrap gap-3"><input className="h-10 min-w-72 rounded-md border border-border bg-transparent px-3" placeholder="Search resources" value={query} onChange={(event) => setQuery(event.target.value)} /><select className="h-10 rounded-md border border-border bg-transparent px-3" value={type} onChange={(event) => setType(event.target.value)}><option>All</option>{types.map((item) => <option key={item} value={item}>{item.replaceAll("_", " ")}</option>)}</select></div></Panel><div className="mt-5 grid gap-4 lg:grid-cols-3">{resources.map((resource) => <Link key={resource.id} to={`/resources/${resource.id}`}><Panel><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{resource.type.replaceAll("_", " ")}</p><h2 className="mt-2 font-semibold">{resource.title}</h2><p className="mt-2 text-sm text-muted-foreground">{resource.description}</p></Panel></Link>)}</div>{!resources.length ? <EmptyState text="No resources match this search." action="Clear Filters" onClick={() => { setQuery(""); setType("All"); }} /> : null}</>;
+}
+
+function GlobalResourceDetail({ resource }: { resource: AppData["learningResources"][number] }) {
+  const [worksheet, setWorksheet] = useState<Record<string, string>>({});
+  const checklist = resource.contentBlocks.find((block) => block.type === "checklist")?.data as { items?: string[] } | undefined;
+  const items = checklist?.items ?? [];
+  const missing = items.filter((item) => !worksheet[item]?.trim());
+  const interactive = resource.id === "resource-incident-capture-guide";
+  return <><PageHeader title={resource.title} subtitle={`Resource Center · Last updated ${new Date(resource.updatedAt).toLocaleDateString()}`} action={<button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => window.print()}>Print</button>} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><p className="text-sm text-muted-foreground">{resource.description}</p><div className="mt-5 grid gap-3 md:grid-cols-2">{items.map((item) => <div key={item} className="rounded-md border border-border bg-muted/30 p-3 text-sm">{item}</div>)}</div>{interactive ? <div className="mt-6 rounded-md border border-cyan-200 bg-cyan-50 p-4 dark:border-cyan-900 dark:bg-cyan-950"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Training / Job Aid</p><h2 className="mt-1 font-semibold">Start Worksheet</h2><p className="mt-2 text-sm text-muted-foreground">This is not an official incident-management system. Use it to practice completeness.</p><div className="mt-4 grid gap-3">{items.map((item) => <label key={item} className="text-sm"><span className="font-medium">{item}</span><input className="mt-1 h-10 w-full rounded-md border border-border bg-background px-3" value={worksheet[item] ?? ""} onChange={(event) => setWorksheet((current) => ({ ...current, [item]: event.target.value }))} /></label>)}</div></div> : null}</Panel><Panel><h2 className="font-semibold">Review Completeness</h2>{interactive ? <><p className="mt-2 text-sm text-muted-foreground">{missing.length ? `${missing.length} categories still need information.` : "All categories include practice information."}</p><div className="mt-3 space-y-2">{missing.map((item) => <div key={item} className="rounded-md border border-border p-2 text-sm">{item}</div>)}</div></> : <p className="mt-2 text-sm text-muted-foreground">Use the print action for a clean reference copy.</p>}<Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/resources">Back to Resources</Link></Panel></div></>;
+}
+
+function LearningSettingsPage() {
+  const { data, user, service, setData, toast } = useApp();
+  const existing = data.learningPreferences.find((item) => item.userId === user.id && item.key === "learningPreferences")?.value as Record<string, string> | undefined;
+  const [prefs, setPrefs] = useState({
+    defaultSupportMode: existing?.defaultSupportMode ?? "STANDARD",
+    textSize: existing?.textSize ?? "STANDARD",
+    reducedMotion: existing?.reducedMotion ?? "SYSTEM",
+    outlineMode: existing?.outlineMode ?? "EXPANDED",
+    scenarioTheme: existing?.scenarioTheme ?? "SYSTEM"
+  });
+  const save = async () => {
+    const svc = service();
+    await svc.saveLearningPreference("learningPreferences", prefs);
+    setData(svc.snapshot());
+    toast("Learning preferences saved");
+  };
+  return <><PageHeader title="Learning Settings" subtitle="Set default guidance, text size, motion, outline, and scenario theme preferences." /><Panel><div className="grid gap-4 md:grid-cols-2">{Object.entries({ defaultSupportMode: ["GUIDED", "STANDARD", "CHALLENGE"], textSize: ["STANDARD", "LARGE"], reducedMotion: ["SYSTEM", "ON", "OFF"], outlineMode: ["EXPANDED", "COMPACT"], scenarioTheme: ["SYSTEM", "LIGHT", "DARK"] }).map(([key, options]) => <label key={key} className="text-sm"><span className="font-medium">{titleize(key)}</span><select className="mt-1 h-10 w-full rounded-md border border-border bg-transparent px-3" value={prefs[key as keyof typeof prefs]} onChange={(event) => setPrefs((current) => ({ ...current, [key]: event.target.value }))}>{options.map((option) => <option key={option}>{option}</option>)}</select></label>)}</div><button className="mt-5 rounded-md bg-cyan-700 px-4 py-2 text-sm text-white" onClick={save}>Save Preferences</button></Panel></>;
+}
+
+function StandardImpactPage() {
+  const { standardId } = useParams();
+  const { data, service, setData, toast } = useApp();
+  const standard = data.standards.find((item) => item.id === standardId);
+  if (!standard) return <NotFound />;
+  const versionIds = data.standardVersions.filter((version) => version.standardId === standard.id).map((version) => version.id);
+  const affectedCourses = data.courseStandardMappings.filter((mapping) => versionIds.includes(mapping.standardVersionId)).map((mapping) => data.courses.find((course) => course.id === mapping.courseId)).filter(Boolean) as Course[];
+  const review = data.standardChangeReviews.find((item) => item.standardId === standard.id);
+  const addNote = async (status: string) => {
+    const svc = service();
+    const snapshot = svc.snapshot();
+    if (review) {
+      review.status = status === "No Content Change Needed" ? "COMPLETE" : "CONTENT_UPDATE_REQUIRED";
+      review.updatedAt = new Date().toISOString();
+    }
+    await svc.persist();
+    setData(snapshot);
+    toast(status);
+  };
+  return <><PageHeader title={`${standard.number} Impact Review`} subtitle="Review related courses, lessons, assessments, and resources before deciding whether content changes are needed." /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="font-semibold">Affected Courses</h2><div className="mt-3 space-y-3">{affectedCourses.map((course) => { const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId); const resources = data.learningResources.filter((resource) => resource.relatedCourseIds.includes(course.id)); return <div key={course.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{course.title}</p><p className="text-muted-foreground">{lessons.length} lessons · {resources.length} resources · Health: {ContentHealthService.getCourseHealth(data, course.id).state}</p><Link className="mt-2 inline-flex rounded-md border border-border px-2 py-1 text-xs" to={`/build/courses/${course.id}`}>Open Course</Link></div>; })}</div></Panel><Panel><h2 className="font-semibold">Content Decision</h2><p className="mt-2 text-sm text-muted-foreground">{review?.summary ?? "No active standard change review is open for this standard."}</p><div className="mt-4 flex flex-col gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => addNote("No Content Change Needed")}>No Content Change Needed</button><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => addNote("Create Draft Update")}>Create Draft Update</button><Link className="rounded-md border border-border px-3 py-2 text-sm text-center" to="/standards">Back to Standards</Link></div></Panel></div></>;
 }
 
 function LearningOutline({ course, lessons, activeLessonId, state, userId, onClose }: { course: Course; lessons: ReturnType<typeof sortedLessons>; activeLessonId: string; state: ReturnType<typeof getCourseCompletionState>; userId: string; onClose: () => void }) {
@@ -1349,12 +1489,14 @@ function CompletionPanel({ course }: { course: Course }) {
 }
 
 function CourseFeedback({ courseId }: { courseId: string }) {
-  const { data, user, setData, toast } = useApp();
+  const { data, user, service, setData, toast } = useApp();
   const [rating, setRating] = useState(0);
   const [comment, setComment] = useState("");
-  const submit = () => {
-    data.courseFeedback.push({ id: crypto.randomUUID(), userId: user.id, courseId, usefulness: rating, confidence: rating, comment, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
-    setData({ ...data });
+  const usefulness = rating >= 5 ? "VERY_USEFUL" : rating >= 4 ? "USEFUL" : rating >= 2 ? "SOMEWHAT_USEFUL" : "NOT_USEFUL";
+  const submit = async () => {
+    const svc = service();
+    await svc.recordContentFeedback({ targetType: "COURSE", targetId: courseId, courseId, usefulness, comment });
+    setData(svc.snapshot());
     toast("Feedback submitted");
   };
   return <div className="mt-5 rounded-md border border-emerald-300 p-4"><h3 className="font-semibold">How useful was this course?</h3><div className="mt-2 flex gap-1">{[1, 2, 3, 4, 5].map((value) => <button key={value} className={`rounded-md border px-2 py-1 ${rating >= value ? "bg-cyan-700 text-white" : ""}`} onClick={() => setRating(value)} aria-label={`${value} rating`}><Star size={15} /></button>)}</div><textarea className="mt-3 w-full rounded-md border border-border bg-transparent p-2 text-sm" placeholder="What would make this training more useful?" value={comment} onChange={(event) => setComment(event.target.value)} /><button className="mt-2 rounded-md border border-emerald-300 px-3 py-2 text-sm" disabled={!rating} onClick={submit}>Submit Feedback</button></div>;
@@ -1481,7 +1623,7 @@ function ScenarioDetail() {
     setData(svc.snapshot());
     navigate(`/scenarios/${scenario.id}/run/${attempt.id}`);
   };
-  return <><PageHeader title={scenario.title} subtitle={scenario.description} action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => start()}>Start Scenario</button>} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="font-semibold">What You’ll Practice</h2><ul className="mt-3 list-disc space-y-2 pl-5 text-sm text-muted-foreground">{scenario.skillIds.map((idValue) => <li key={idValue}>{data.skills.find((skill) => skill.id === idValue)?.name}</li>)}</ul><h2 className="mt-6 font-semibold">Related Courses</h2><div className="mt-3 flex flex-wrap gap-2">{scenario.relatedCourseIds.map((idValue) => <Link key={idValue} className="rounded-md border border-border px-3 py-2 text-sm" to={`/courses/${idValue}`}>{data.courses.find((course) => course.id === idValue)?.shortTitle ?? idValue}</Link>)}</div></Panel><Panel><h2 className="font-semibold">Previous Attempts</h2><div className="mt-3 space-y-2">{attempts.map((attempt) => <div key={attempt.id} className="rounded-md border border-border p-3 text-sm"><p>{attempt.completedAt ? "Completed" : "In progress"} · {attempt.overallResult.replaceAll("_", " ")}</p><button className="mt-2 rounded-md border border-border px-2 py-1 text-xs" onClick={() => start(attempt.id)}>Replay</button></div>)}{!attempts.length ? <p className="text-sm text-muted-foreground">No attempts yet.</p> : null}</div></Panel></div></>;
+  return <><PageHeader title={scenario.title} subtitle={scenario.description} action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => start()}>Start Scenario</button>} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel className="border-cyan-200 bg-cyan-50/50 dark:border-cyan-900 dark:bg-cyan-950/30"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Mission</p><h2 className="mt-2 text-2xl font-semibold">Mission Briefing</h2><p className="mt-2 text-sm text-muted-foreground">Situation: {scenario.description}</p><h3 className="mt-5 font-semibold">Your Objectives</h3><div className="mt-3 grid gap-2 md:grid-cols-2">{(scenario.objectives ?? scenario.skillIds.map((skillId) => ({ id: skillId, label: data.skills.find((skill) => skill.id === skillId)?.name ?? skillId, skillId, required: true }))).map((objective) => <div key={objective.id} className="rounded-md border border-border bg-background p-3 text-sm">✓ {objective.label}</div>)}</div><h3 className="mt-5 font-semibold">Systems Available</h3><p className="mt-2 text-sm text-muted-foreground">{titleize((scenario.workspaceType ?? "ACCESS_MANAGER").toLowerCase())}</p></Panel><Panel><h2 className="font-semibold">Previous Attempts</h2><div className="mt-3 space-y-2">{attempts.map((attempt) => <div key={attempt.id} className="rounded-md border border-border p-3 text-sm"><p>{attempt.completedAt ? "Completed" : "In progress"} · {attempt.overallResult.replaceAll("_", " ")}</p><div className="mt-2 flex gap-2"><Link className="rounded-md border border-border px-2 py-1 text-xs" to={`/scenarios/${scenario.id}/run/${attempt.id}`}>{attempt.completedAt ? "Review" : "Resume"}</Link><button className="rounded-md border border-border px-2 py-1 text-xs" onClick={() => start(attempt.id)}>Replay</button></div></div>)}{!attempts.length ? <p className="text-sm text-muted-foreground">No attempts yet.</p> : null}</div></Panel></div></>;
 }
 
 function ScenarioRun() {
@@ -1500,7 +1642,46 @@ function ScenarioRun() {
     toast(choice.quality === "RECOMMENDED" ? "Recommended decision saved" : "Decision saved");
     if (nextAttempt.completedAt) navigate(`/scenarios/${scenario.id}/run/${attempt.id}`);
   };
-  return <div className="-m-4 min-h-[calc(100vh-2rem)] bg-slate-950 p-4 text-slate-100 md:-m-6 md:p-6"><div className="mx-auto max-w-5xl"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">{scenario.category} · Step {scenario.steps.findIndex((item) => item.id === step.id) + 1} of {scenario.steps.length}</p><h1 className="mt-1 text-3xl font-semibold">{scenario.title}</h1></div><Link className="rounded-md border border-slate-700 px-3 py-2 text-sm" to={`/scenarios/${scenario.id}`}>Exit Scenario</Link></div><div className="mt-6 grid gap-5 lg:grid-cols-[360px_1fr]"><section className="rounded-md border border-slate-800 bg-slate-900 p-4"><h2 className="font-semibold">Workspace State</h2><div className="mt-3 space-y-2 text-sm">{Object.entries(attempt.currentState).map(([key, value]) => <div key={key} className="flex justify-between gap-3 border-b border-slate-800 py-2"><span className="text-slate-400">{titleize(key)}</span><span>{String(value)}</span></div>)}</div></section><section className="rounded-md border border-slate-800 bg-slate-900 p-5"><h2 className="text-xl font-semibold">{step.title ?? "Decision"}</h2><p className="mt-3 leading-7 text-slate-300">{step.narrative}</p><div className="mt-5 grid gap-3">{step.choices?.map((choice) => <button key={choice.id} className="rounded-md border border-slate-700 bg-slate-950 p-4 text-left hover:border-cyan-400 focus:border-cyan-400" onClick={() => choose(choice)}><span className="font-medium">{choice.label}</span>{choice.description ? <span className="mt-1 block text-sm text-slate-400">{choice.description}</span> : null}</button>)}</div></section></div></div></div>;
+  const recordAction = async (actionType: "INSPECT" | "FLAG" | "VERIFY" | "ESCALATE" | "PRESERVE" | "DOCUMENT", targetId?: string) => {
+    const svc = service();
+    if (actionType === "INSPECT" && targetId && simulationTabs(scenario.workspaceType).includes(targetId)) {
+      await svc.setScenarioSimulationTab(attempt.id, targetId);
+    } else {
+      await svc.recordSimulationAction(attempt.id, actionType, targetId);
+    }
+    setData(svc.snapshot());
+    toast(`${titleize(actionType.toLowerCase())} saved`);
+  };
+  return <div className="-m-4 min-h-[calc(100vh-2rem)] bg-slate-950 p-4 text-slate-100 md:-m-6 md:p-6"><div className="mx-auto max-w-6xl"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">{scenario.category} · Step {scenario.steps.findIndex((item) => item.id === step.id) + 1} of {scenario.steps.length} · {attempt.supportMode ?? "STANDARD"} mode</p><h1 className="mt-1 text-3xl font-semibold">{scenario.title}</h1></div><Link className="rounded-md border border-slate-700 px-3 py-2 text-sm" to={`/scenarios/${scenario.id}`}>Exit Scenario</Link></div><div className="mt-6 grid gap-5 xl:grid-cols-[1.1fr_0.9fr]"><SimulationWorkspace scenario={scenario} attempt={attempt} onAction={recordAction} /><section className="rounded-md border border-slate-800 bg-slate-900 p-5"><h2 className="text-xl font-semibold">{step.title ?? "Decision"}</h2><p className="mt-3 leading-7 text-slate-300">{step.narrative}</p>{attempt.supportMode === "GUIDED" ? <div className="mt-4 rounded-md border border-cyan-800 bg-cyan-950/50 p-3 text-sm text-cyan-100">Learning Coach: preserve facts, verify context, and document the decision path before acting.</div> : null}<div className="mt-5 grid gap-3">{step.choices?.map((choice) => <button key={choice.id} className="rounded-md border border-slate-700 bg-slate-950 p-4 text-left hover:border-cyan-400 focus:border-cyan-400" onClick={() => choose(choice)}><span className="font-medium">{choice.label}</span>{choice.description ? <span className="mt-1 block text-sm text-slate-400">{choice.description}</span> : null}</button>)}</div></section></div></div></div>;
+}
+
+function SimulationWorkspace({ scenario, attempt, onAction }: { scenario: AppData["scenarioDefinitions"][number]; attempt: AppData["branchingScenarioAttempts"][number]; onAction: (action: "INSPECT" | "FLAG" | "VERIFY" | "ESCALATE" | "PRESERVE" | "DOCUMENT", targetId?: string) => void }) {
+  const tabs = simulationTabs(scenario.workspaceType);
+  const active = attempt.simulationState?.activeTab ?? tabs[0];
+  const flags = attempt.simulationState?.flags ?? [];
+  return <section className="rounded-md border border-slate-800 bg-slate-900"><div className="border-b border-slate-800 p-4"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-300">{titleize((scenario.workspaceType ?? "ACCESS_MANAGER").toLowerCase())}</p><div className="mt-3 flex flex-wrap gap-2">{tabs.map((tab) => <button key={tab} className={`rounded-md border px-3 py-2 text-sm ${active === tab ? "border-cyan-400 bg-cyan-950" : "border-slate-700"}`} onClick={() => onAction("INSPECT", tab)}>{tab}</button>)}</div></div><div className="p-4"><SimulationRecords type={scenario.workspaceType} flags={flags} onAction={onAction} /><div className="mt-4 rounded-md border border-slate-800 bg-slate-950 p-3"><h3 className="font-semibold">State</h3><div className="mt-2 grid gap-2 text-sm sm:grid-cols-2">{Object.entries(attempt.currentState).map(([key, value]) => <div key={key} className="flex justify-between gap-3 border-b border-slate-800 py-2"><span className="text-slate-400">{titleize(key)}</span><span>{String(value)}</span></div>)}</div></div><div className="mt-4 flex flex-wrap gap-2"><button className="rounded-md border border-slate-700 px-3 py-2 text-sm" onClick={() => onAction("PRESERVE", "current-evidence")}>Preserve Evidence</button><button className="rounded-md border border-slate-700 px-3 py-2 text-sm" onClick={() => onAction("VERIFY", "maintenance-context")}>Check Maintenance</button><button className="rounded-md border border-slate-700 px-3 py-2 text-sm" onClick={() => onAction("ESCALATE", "approved-channel")}>Escalate</button><button className="rounded-md border border-slate-700 px-3 py-2 text-sm" onClick={() => onAction("DOCUMENT", "scenario-summary")}>Document</button></div></div></section>;
+}
+
+function simulationTabs(type?: AppData["scenarioDefinitions"][number]["workspaceType"]) {
+  if (type === "SYSTEM_CONSOLE") return ["Overview", "Services", "Accounts", "Patches", "Configuration", "Vulnerabilities"];
+  if (type === "INCIDENT_CONSOLE") return ["Events", "Timeline", "Systems", "Accounts", "Evidence", "Response"];
+  if (type === "RECOVERY_CONSOLE") return ["Systems", "Dependencies", "Backups", "Procedures", "Exercises", "Issues"];
+  if (type === "VENDOR_WORKSPACE") return ["Supplier", "Product", "Access", "Contract", "Security Review", "Issues"];
+  if (type === "AUDIT_WORKSPACE") return ["Requirement", "Procedure", "Population", "Samples", "Evidence", "Exceptions"];
+  return ["Person", "Role", "Electronic Access", "Physical Access", "Approvals", "History"];
+}
+
+function SimulationRecords({ type, flags, onAction }: { type?: AppData["scenarioDefinitions"][number]["workspaceType"]; flags: string[]; onAction: (action: "INSPECT" | "FLAG" | "VERIFY" | "ESCALATE" | "PRESERVE" | "DOCUMENT", targetId?: string) => void }) {
+  const rows = type === "SYSTEM_CONSOLE"
+    ? [["FTP 21", "Legacy service", "Owner missing"], ["RDP 3389", "Temporary project", "Expired"], ["svc_backup", "Service account", "Unassigned"], ["PATCH-2026-042", "Applicable", "Constraint under review"]]
+    : type === "INCIDENT_CONSOLE"
+      ? [["02:12 HIGH", "Unexpected administrative connection", "ENG-WS-22 to OPS-SRV-04"], ["02:14 MED", "Authentication pattern change", "jrivera-admin"], ["02:20 MED", "Additional admin connection", "No maintenance visible"]]
+      : type === "RECOVERY_CONSOLE"
+        ? [["Identity", "Dependency", "Undocumented"], ["Storage", "Procedure", "Retired platform"], ["Backup", "Available", "Validation pending"]]
+        : type === "AUDIT_WORKSPACE"
+          ? [["Sample C", "Evidence", "Missing approval"], ["Exception", "Record", "Expired"], ["Population", "Reconciliation", "42 expected / 39 included"]]
+          : [["Jordan Lee", "Role change", "Operational access active"], ["Remote Administration", "Electronic access", "Review required"], ["Restricted Workspace", "Physical access", "Review required"]];
+  return <div className="space-y-2">{rows.map(([idValue, label, status]) => <div key={idValue} className="rounded-md border border-slate-800 bg-slate-950 p-3 text-sm"><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="font-medium">{idValue}</p><p className="text-slate-400">{label} · {status}</p></div><div className="flex gap-2"><button className="rounded-md border border-slate-700 px-2 py-1 text-xs" onClick={() => onAction("INSPECT", idValue)}>Inspect</button><button className="rounded-md border border-slate-700 px-2 py-1 text-xs" onClick={() => onAction("FLAG", idValue)}>{flags.includes(idValue) ? "Flagged" : "Flag"}</button></div></div></div>)}</div>;
 }
 
 function ScenarioResult({ scenario, attempt }: { scenario: AppData["scenarioDefinitions"][number]; attempt: AppData["branchingScenarioAttempts"][number] }) {
@@ -1527,6 +1708,75 @@ function LearningMapPage() {
   const { data, user } = useApp();
   const nodes = ["course-annual-awareness", "course-cip004-foundations", "course-cip005-esp-access", "course-cip006-physical-security", "course-cip007-system-security", "course-cip010-change-vulnerability", "course-cip008-incident-response", "course-cip015-insm", "course-cip002-categorization", "course-cip003-security-management", "course-audit-preparation"];
   return <><PageHeader title="Learning Map" subtitle="See how NERC CIP capabilities build across courses, practice, and scenarios." /><Panel><div className="grid gap-3 md:grid-cols-3">{nodes.map((courseId, index) => { const course = data.courses.find((item) => item.id === courseId); if (!course) return null; const state = getCourseCompletionState(data, user.id, course.id); return <Link key={course.id} className="rounded-md border border-border p-4 hover:border-cyan-700" to={`/courses/${course.id}`}><p className="text-xs text-muted-foreground">Step {index + 1}</p><h2 className="mt-1 font-semibold">{course.shortTitle ?? course.title}</h2><p className="mt-2 text-sm text-muted-foreground">{state.courseComplete ? "Complete" : state.percent ? "In Progress" : "Available"} · {state.percent}%</p></Link>; })}</div></Panel></>;
+}
+
+function LearningSessionPage() {
+  const { data, user, service, setData, toast } = useApp();
+  const [params, setParams] = useSearchParams();
+  const minutes = Number(params.get("minutes") ?? 15) as 5 | 10 | 15 | 30;
+  const sessionId = params.get("sessionId");
+  const existing = sessionId ? data.learningSessions.find((item) => item.id === sessionId) : undefined;
+  const [session, setSession] = useState(existing ?? LearningSessionService.buildSession(data, user.id, [5, 10, 15, 30].includes(minutes) ? minutes : 15));
+
+  useEffect(() => {
+    if (existing) return;
+    const svc = service();
+    void svc.saveLearningSession(session).then(() => {
+      setData(svc.snapshot());
+      setParams({ sessionId: session.id });
+    });
+  }, []);
+
+  const completeItem = async (targetId: string) => {
+    const svc = service();
+    await svc.completeLearningSessionItem(session.id, targetId);
+    setData(svc.snapshot());
+    const updated = svc.snapshot().learningSessions.find((item) => item.id === session.id);
+    if (updated) setSession(updated);
+    toast("Session step completed");
+  };
+  const completed = session.items.filter((item) => item.completedAt).length;
+  const current = session.items.find((item) => !item.completedAt);
+  if (session.completedAt) return <><PageHeader title="Session Complete" subtitle={`${session.targetMinutes} minutes of targeted reinforcement.`} /><Panel><h2 className="text-2xl font-semibold">You reinforced</h2><div className="mt-3 grid gap-3 md:grid-cols-3">{session.skillIds.map((skillId) => <Info key={skillId} label={data.skills.find((skill) => skill.id === skillId)?.name ?? skillId} value="Strong" />)}</div><div className="mt-5 flex gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/home">Return Home</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/scenarios/scenario-unexpected-admin-connection">Recommended Scenario</Link></div></Panel></>;
+  return <><PageHeader title={session.title} subtitle="A short guided sequence assembled from your current recommendations." /><Panel><div className="flex flex-wrap items-center justify-between gap-3"><div><p className="text-sm text-muted-foreground">{completed} of {session.items.length} steps complete</p><h2 className="mt-1 text-xl font-semibold">Today you'll reinforce {session.skillIds.map((skillId) => data.skills.find((skill) => skill.id === skillId)?.name).filter(Boolean).join(", ") || "core GridGuard skills"}</h2></div><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/review">Review My Mistakes</Link></div></Panel><div className="mt-5 grid gap-5 lg:grid-cols-[1fr_320px]"><Panel><h2 className="font-semibold">Current Step</h2>{current ? <SessionItem item={current} onComplete={completeItem} /> : null}</Panel><Panel><h2 className="font-semibold">Sequence</h2><div className="mt-3 space-y-2">{session.items.map((item) => <SessionItemSummary key={item.id} item={item} />)}</div></Panel></div></>;
+}
+
+function SessionItem({ item, onComplete }: { item: AppData["learningSessions"][number]["items"][number]; onComplete: (targetId: string) => void }) {
+  const { data } = useApp();
+  const target = item.itemType === "SCENARIO" ? data.scenarioDefinitions.find((scenario) => scenario.id === item.targetId) : data.practiceActivities.find((activity) => activity.id === item.targetId);
+  const href = item.itemType === "SCENARIO" ? `/scenarios/${item.targetId}` : `/practice/${item.targetId}`;
+  return <div className="mt-3 rounded-md border border-border p-4"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{item.itemType.replaceAll("_", " ")}</p><h3 className="mt-2 text-xl font-semibold">{target?.title ?? item.targetId}</h3><p className="mt-2 text-sm text-muted-foreground">{target?.description}</p><p className="mt-3 text-sm">{item.estimatedMinutes} min</p><div className="mt-4 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={href}>Open Activity</Link><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => onComplete(item.targetId)}>Mark Step Complete</button></div></div>;
+}
+
+function SessionItemSummary({ item }: { item: AppData["learningSessions"][number]["items"][number] }) {
+  const { data } = useApp();
+  const target = item.itemType === "SCENARIO" ? data.scenarioDefinitions.find((scenario) => scenario.id === item.targetId) : data.practiceActivities.find((activity) => activity.id === item.targetId);
+  return <div className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{target?.title ?? item.targetId}</p><p className="text-muted-foreground">{item.completedAt ? "Complete" : "Open"} · {item.estimatedMinutes} min</p></div>;
+}
+
+function ReviewMistakesPage() {
+  const { data, user } = useApp();
+  const misconceptions = buildMisconceptions(data, user.id);
+  return <><PageHeader title="Review My Mistakes" subtitle="Revisit concepts that have caused difficulty across courses, practice, and scenarios." /><div className="grid gap-4 lg:grid-cols-2">{misconceptions.map((item) => <Panel key={item.id}><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Pattern detected</p><h2 className="mt-2 text-xl font-semibold">{item.title}</h2><p className="mt-2 text-sm text-muted-foreground">{item.explanation}</p><p className="mt-3 text-sm">Seen in {item.occurrences} learning result{item.occurrences === 1 ? "" : "s"}.</p><div className="mt-4 flex flex-wrap gap-2">{item.recommendedActivityIds.map((activityId) => <Link key={activityId} className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/practice/${activityId}`}>Try New Challenge</Link>)}<Link className="rounded-md border border-border px-3 py-2 text-sm" to="/learning">Review Lesson</Link></div></Panel>)}</div>{!misconceptions.length ? <EmptyState text="No recurring review patterns are visible right now." action="Explore Practice" href="/practice" /> : null}</>;
+}
+
+function buildMisconceptions(data: AppData, userId: string) {
+  const weakEvidence = data.skillEvidence.filter((item) => item.userId === userId && item.result !== "STRONG");
+  const failedTopics = data.assessmentAttempts.filter((item) => item.userId === userId && !item.passed).flatMap((item) => item.missedTopics ?? []);
+  const ids = Array.from(new Set([...weakEvidence.map((item) => item.skillId), ...failedTopics.map((topic) => data.skills.find((skill) => topic.toLowerCase().includes(skill.name.toLowerCase().split(" ")[0]))?.id).filter(Boolean) as string[]]));
+  return ids.map((skillId) => {
+    const skill = data.skills.find((item) => item.id === skillId)!;
+    const activities = data.practiceActivities.filter((activity) => activity.skillIds.includes(skillId)).slice(0, 2);
+    const occurrences = weakEvidence.filter((item) => item.skillId === skillId).length + failedTopics.filter((topic) => topic.toLowerCase().includes(skill.name.toLowerCase().split(" ")[0])).length;
+    return { id: `misconception-${userId}-${skillId}`, userId, topicId: skillId, skillId, title: skill.name, explanation: misconceptionExplanation(skill.name), evidenceSources: [], occurrences: Math.max(1, occurrences), recommendedActivityIds: activities.map((activity) => activity.id) };
+  });
+}
+
+function misconceptionExplanation(skillName: string) {
+  if (skillName.includes("Patch")) return "You sometimes treat applicability and implementation as the same decision. Applicability asks whether a patch applies; implementation asks how it should be handled through the approved process.";
+  if (skillName.includes("Incident")) return "The pattern suggests a need to separate known facts from final incident classification.";
+  if (skillName.includes("Evidence")) return "The recurring issue is traceability: another reviewer needs who, what, when, result, and process connection.";
+  return `This topic has recent developing or needs-review evidence. A short practice activity can reinforce the underlying decision pattern.`;
 }
 
 function CampaignLearnerPage() {
@@ -1706,12 +1956,13 @@ function SkillDetailPage() {
   const { skillId } = useParams();
   const { data, user } = useApp();
   const mastery = SkillMasteryService.getSkillMastery(data, user.id).find((item) => item.skillId === skillId);
+  const competency = SkillCompetencyService.getCompetencyStates(data, user.id).find((item) => item.skillId === skillId);
   const skill = data.skills.find((item) => item.id === skillId);
   if (!skill || !mastery) return <NotFound />;
   const evidence = data.skillEvidence.filter((item) => item.userId === user.id && item.skillId === skill.id).sort((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime());
   const practices = data.practiceActivities.filter((activity) => activity.skillIds.includes(skill.id));
   const scenarios = data.scenarioDefinitions.filter((scenario) => scenario.skillIds.includes(skill.id));
-  return <><PageHeader title={skill.name} subtitle={skill.description} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="text-xl font-semibold">{mastery.state.replaceAll("_", " ")}</h2><p className="mt-2 text-sm text-muted-foreground">Current state is calculated from recent course, practice, and scenario evidence.</p><h3 className="mt-6 font-semibold">Recent Evidence</h3><div className="mt-3 space-y-2">{evidence.map((item) => <div key={item.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{item.details ?? item.sourceType.replaceAll("_", " ")}</p><p className="text-muted-foreground">{item.result.replaceAll("_", " ")} · {new Date(item.observedAt).toLocaleDateString()}</p></div>)}{!evidence.length ? <p className="text-sm text-muted-foreground">Complete related courses, practice, or scenarios to build evidence.</p> : null}</div></Panel><Panel><h2 className="font-semibold">Recommended Next</h2><div className="mt-3 space-y-2">{practices.slice(0, 3).map((activity) => <Link key={activity.id} className="block rounded-md border border-border p-3 text-sm" to={`/practice/${activity.id}`}>{activity.title}<span className="block text-xs text-muted-foreground">{activity.estimatedMinutes} min practice</span></Link>)}{scenarios.slice(0, 3).map((scenario) => <Link key={scenario.id} className="block rounded-md border border-border p-3 text-sm" to={`/scenarios/${scenario.id}`}>{scenario.title}<span className="block text-xs text-muted-foreground">{scenario.estimatedMinutes} min scenario</span></Link>)}</div></Panel></div></>;
+  return <><PageHeader title={skill.name} subtitle={skill.description} /><div className="grid gap-5 lg:grid-cols-[1fr_340px]"><Panel><h2 className="text-xl font-semibold">{mastery.state.replaceAll("_", " ")}</h2><p className="mt-2 text-sm text-muted-foreground">Current state is calculated from recent course, practice, and scenario evidence.</p>{competency ? <div className="mt-6"><h3 className="font-semibold">Competency Progression</h3><div className="mt-3 grid gap-2 sm:grid-cols-4">{(["LEARN", "PRACTICE", "APPLY", "DEMONSTRATE"] as const).map((stage) => { const done = competency.stageEvidence[stage.toLowerCase() as keyof typeof competency.stageEvidence]; const current = competency.currentStage === stage; return <div key={stage} className={`rounded-md border p-3 text-sm ${current ? "border-cyan-700 bg-cyan-50 dark:bg-cyan-950" : "border-border"}`}><p className="font-medium">{done ? "✓" : current ? "●" : "○"} {stage}</p></div>; })}</div><p className="mt-3 text-sm text-muted-foreground">Current stage: {competency.currentStage}. The next useful step is selected from related practice, scenarios, and assessments.</p></div> : null}<h3 className="mt-6 font-semibold">Recent Evidence</h3><div className="mt-3 space-y-2">{evidence.map((item) => <div key={item.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{item.details ?? item.sourceType.replaceAll("_", " ")}</p><p className="text-muted-foreground">{item.result.replaceAll("_", " ")} · {new Date(item.observedAt).toLocaleDateString()}</p></div>)}{!evidence.length ? <p className="text-sm text-muted-foreground">Complete related courses, practice, or scenarios to build evidence.</p> : null}</div></Panel><Panel><h2 className="font-semibold">Recommended Next</h2><div className="mt-3 space-y-2">{practices.slice(0, 3).map((activity) => <Link key={activity.id} className="block rounded-md border border-border p-3 text-sm" to={`/practice/${activity.id}`}>{activity.title}<span className="block text-xs text-muted-foreground">{activity.estimatedMinutes} min practice · {activity.progressionLevel ?? "PRACTICE"}</span></Link>)}{scenarios.slice(0, 3).map((scenario) => <Link key={scenario.id} className="block rounded-md border border-border p-3 text-sm" to={`/scenarios/${scenario.id}`}>{scenario.title}<span className="block text-xs text-muted-foreground">{scenario.estimatedMinutes} min scenario</span></Link>)}</div></Panel></div></>;
 }
 
 function AdminHome() {
@@ -1792,11 +2043,26 @@ function DemoSwitcher({ onClose, onSwitch, onLogout }: { onClose: () => void; on
   return <Modal title="My Profile" onClose={onClose}><div className="mb-4"><p className="font-medium">{user.name}</p><p className="text-sm text-muted-foreground">{getRoles(data, user.id).join(", ")}</p></div><h3 className="font-semibold">Experience GridGuard as:</h3><div className="mt-3 grid gap-3">{accounts.map((account) => <div key={account.id} data-testid={`switch-${account.email}`} className="flex items-center justify-between rounded-md border border-border p-3"><div><p className="font-medium">{account.name}</p><p className="text-sm text-muted-foreground">{getRoles(data, account.id).join(", ")} • {account.email}</p></div><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => onSwitch(account.id)}>Switch</button></div>)}</div><button className="mt-4 flex items-center gap-2 text-sm text-red-700" onClick={onLogout}><LogOut size={16}/>Sign Out</button></Modal>;
 }
 
+function LearnerOnboarding({ onClose }: { onClose: () => void }) {
+  const { data, user } = useApp();
+  const [step, setStep] = useState(0);
+  const journey = LearnerJourneyService.getLearnerJourney(data, user.id);
+  const screens = [
+    ["Welcome to GridGuard", "Learn, practice, apply, and prove cybersecurity capability through structured training and realistic scenarios."],
+    ["Learn", "Complete assigned NERC CIP training and follow learning paths that match your responsibilities."],
+    ["Practice & Apply", "Strengthen skills through short challenges and Scenario Lab missions without restarting a full course."],
+    ["Your First Priority", journey.primaryAction ? `${journey.primaryAction.title}: ${journey.primaryAction.reasonText}` : "You're caught up. Start a short learning session when you are ready."]
+  ];
+  const [title, body] = screens[step];
+  return <section className="fixed bottom-4 left-4 z-50 w-[calc(100vw-2rem)] max-w-md rounded-md border border-border bg-white p-4 shadow-xl dark:bg-slate-950" aria-label="Onboarding guide"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Welcome</p><h2 className="mt-1 text-lg font-semibold">{title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p><div className="mt-4 flex justify-between gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={onClose}>Skip</button><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => step < screens.length - 1 ? setStep(step + 1) : onClose()}>{step < screens.length - 1 ? "Next" : "Start"}</button></div></section>;
+}
+
 function SearchDialog({ onClose }: { onClose: () => void }) {
   const { data, user } = useApp();
   const [query, setQuery] = useState("");
-  const results = searchAuthorized(data, user.id, query);
-  return <Modal title="Search" onClose={onClose}><input autoFocus className="h-11 w-full rounded-md border border-border bg-transparent px-3" placeholder="Search courses, lessons, standards..." value={query} onChange={(event) => setQuery(event.target.value)} /><div className="mt-3 max-h-96 overflow-auto">{results.map((result) => <Link key={`${result.type}-${result.title}`} className="block rounded-md border-b border-border p-3 hover:bg-muted" to={result.href} onClick={onClose}><p className="text-xs text-muted-foreground">{result.type}</p><p className="font-medium">{result.title}</p><p className="text-sm text-muted-foreground">{result.description}</p></Link>)}</div></Modal>;
+  const results = LearningSearchService.search(data, user.id, query);
+  const groups = Array.from(new Set(results.map((result) => result.resultType)));
+  return <Modal title="Search" onClose={onClose}><input autoFocus className="h-11 w-full rounded-md border border-border bg-transparent px-3" placeholder="Search courses, lessons, practice, scenarios, resources, skills..." value={query} onChange={(event) => setQuery(event.target.value)} /><div className="mt-3 max-h-96 overflow-auto">{groups.map((group) => <section key={group} className="mb-3"><p className="px-3 py-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{group}</p>{results.filter((result) => result.resultType === group).slice(0, 6).map((result) => <Link key={result.id} className="block rounded-md border-b border-border p-3 hover:bg-muted" to={result.href} onClick={onClose}><p className="font-medium">{result.title}</p><p className="text-sm text-muted-foreground">{result.description}</p>{result.metadata?.length ? <p className="mt-1 text-xs text-muted-foreground">{result.metadata.join(" · ")}</p> : null}</Link>)}</section>)}</div></Modal>;
 }
 
 function NotesDrawer({ onClose }: { onClose: () => void }) {

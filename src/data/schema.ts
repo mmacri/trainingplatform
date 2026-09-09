@@ -120,6 +120,15 @@ export interface Course extends BaseRecord {
   publishedById?: string;
   archiveReason?: string;
   archivedAt?: string;
+  relationships?: {
+    prerequisites?: string[];
+    buildsOn?: string[];
+    related?: string[];
+    recommendedNext?: string[];
+  };
+  lastContentReviewAt?: string;
+  nextContentReviewAt?: string;
+  contentReviewOwnerId?: string;
 }
 
 export interface CourseOwner extends BaseRecord {
@@ -585,6 +594,9 @@ export interface PracticeActivity extends BaseRecord {
   passingScore?: number;
   repeatable: boolean;
   recommendationWeight?: number;
+  supportModes?: Array<"GUIDED" | "STANDARD" | "CHALLENGE">;
+  progressionTrackId?: string;
+  progressionLevel?: "LEARN" | "PRACTICE" | "APPLY" | "DEMONSTRATE";
 }
 
 export interface PracticeAttempt extends BaseRecord {
@@ -654,6 +666,15 @@ export interface ScenarioDefinition extends BaseRecord {
   resultRules: Array<{ id: string; result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG"; minRecommendedChoices: number }>;
   repeatable: boolean;
   variantPool?: Array<Record<string, string>>;
+  objectives?: ScenarioObjective[];
+  workspaceType?: "SYSTEM_CONSOLE" | "ACCESS_MANAGER" | "INCIDENT_CONSOLE" | "RECOVERY_CONSOLE" | "VENDOR_WORKSPACE" | "AUDIT_WORKSPACE";
+}
+
+export interface ScenarioObjective {
+  id: string;
+  label: string;
+  skillId?: string;
+  required: boolean;
 }
 
 export interface ScenarioStepDefinition {
@@ -690,6 +711,23 @@ export interface BranchingScenarioAttempt extends BaseRecord {
   skillResults: Array<{ topicId: string; result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG"; score?: number }>;
   overallResult: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG";
   replayOfAttemptId?: string;
+  simulationState?: SimulationState;
+  supportMode?: "GUIDED" | "STANDARD" | "CHALLENGE";
+}
+
+export interface SimulationState {
+  activeTab: string;
+  selectedRecordId?: string;
+  flags: string[];
+  learnerActions: SimulationAction[];
+  variables: Record<string, unknown>;
+}
+
+export interface SimulationAction {
+  id: string;
+  actionType: "INSPECT" | "FLAG" | "VERIFY" | "ESCALATE" | "PRESERVE" | "CLASSIFY" | "DOCUMENT" | "APPROVE" | "REJECT";
+  targetId?: string;
+  timestamp: string;
 }
 
 export interface LearningCampaign extends BaseRecord {
@@ -732,16 +770,71 @@ export interface ContentFeedback extends BaseRecord {
   courseVersionId?: string;
   lessonId?: string;
   activityId?: string;
+  targetType?: "COURSE" | "LESSON" | "PRACTICE" | "SCENARIO" | "RESOURCE";
+  targetId?: string;
   userId: string;
   feedbackType: "HELPFUL" | "CONFUSING" | "OUTDATED" | "BROKEN_ACTIVITY";
+  usefulness?: "VERY_USEFUL" | "USEFUL" | "SOMEWHAT_USEFUL" | "NOT_USEFUL";
+  issueType?: "CONFUSING" | "OUTDATED" | "BROKEN";
   comment?: string;
   status: "OPEN" | "REVIEWED";
+  reviewedAt?: string;
+  reviewedByUserId?: string;
 }
 
 export interface LearningPreference extends BaseRecord {
   userId: string;
   key: string;
   value: unknown;
+}
+
+export interface LearningSession extends BaseRecord {
+  userId: string;
+  title: string;
+  targetMinutes: 5 | 10 | 15 | 30;
+  startedAt: string;
+  completedAt?: string;
+  currentItemId?: string;
+  items: LearningSessionItem[];
+  skillIds: string[];
+}
+
+export interface LearningSessionItem {
+  id: string;
+  order: number;
+  itemType: "PRACTICE" | "SCENARIO" | "REINFORCEMENT" | "MICROLEARNING";
+  targetId: string;
+  estimatedMinutes: number;
+  completedAt?: string;
+}
+
+export interface LearnerAchievement extends BaseRecord {
+  userId: string;
+  achievementType: string;
+  title: string;
+  description: string;
+  earnedAt: string;
+}
+
+export interface LearningResource extends BaseRecord {
+  title: string;
+  description: string;
+  type: "QUICK_REFERENCE" | "CHECKLIST" | "JOB_AID" | "PROCESS_GUIDE" | "EVIDENCE_TEMPLATE" | "GLOSSARY" | "STANDARD_REFERENCE";
+  contentBlocks: Array<Pick<ContentBlock, "id" | "type" | "title" | "body" | "data" | "position">>;
+  relatedCourseIds: string[];
+  relatedSkillIds: string[];
+  relatedStandardIds: string[];
+  printable: boolean;
+  global: boolean;
+}
+
+export interface LearningSessionPreference {
+  defaultSupportMode: "GUIDED" | "STANDARD" | "CHALLENGE";
+  textSize: "STANDARD" | "LARGE";
+  reducedMotion: "SYSTEM" | "ON" | "OFF";
+  outlineMode: "EXPANDED" | "COMPACT";
+  scenarioTheme: "SYSTEM" | "LIGHT" | "DARK";
+  onboardingCompletedAt?: string;
 }
 
 export interface StandardChangeReview extends BaseRecord {
@@ -827,6 +920,9 @@ export interface AppData {
   liveLearningSessions: LiveLearningSession[];
   contentFeedbackItems: ContentFeedback[];
   learningPreferences: LearningPreference[];
+  learningSessions: LearningSession[];
+  learnerAchievements: LearnerAchievement[];
+  learningResources: LearningResource[];
 }
 
 export const tableNames = [
@@ -899,7 +995,10 @@ export const tableNames = [
   "learningCampaigns",
   "liveLearningSessions",
   "contentFeedbackItems",
-  "learningPreferences"
+  "learningPreferences",
+  "learningSessions",
+  "learnerAchievements",
+  "learningResources"
 ] as const;
 
 export type TableName = (typeof tableNames)[number];
