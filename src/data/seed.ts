@@ -567,13 +567,13 @@ export function createSeedData(): AppData {
     record("setting", { key: "initialized", value: true }),
     record("setting", { key: "theme", value: "system" }),
     record("setting", { key: "sessionTimeoutHours", value: 8 }),
-    record("setting", { key: "catalogContentVersion", value: 3 }),
+    record("setting", { key: "catalogContentVersion", value: 4 }),
     record("setting", { key: "version", value: "0.1.0" })
   );
 
   data.auditEvents.push(
     record("audit", { organizationId: organization.id, actorId: admin.id, action: "DATA_RESTORED", objectType: "Application", objectId: organization.id, summary: "Demo learning environment initialized." }),
-    record("audit", { organizationId: organization.id, actorId: admin.id, action: "DATA_RESTORED", objectType: "Application", objectId: organization.id, summary: "Demo catalog upgraded to complete curriculum version 3." }),
+    record("audit", { organizationId: organization.id, actorId: admin.id, action: "DATA_RESTORED", objectType: "Application", objectId: organization.id, summary: "Demo catalog upgraded to complete curriculum version 4." }),
     record("audit", { organizationId: organization.id, actorId: author.id, action: "COURSE_PUBLISHED", objectType: "Course", objectId: cip004.id, summary: "Published CIP-004 flagship course." }),
     record("audit", { organizationId: organization.id, actorId: admin.id, action: "ASSIGNMENT_CREATED", objectType: "Assignment", objectId: assignment.id, summary: "Assigned CIP-004 to Taylor Morgan." })
   );

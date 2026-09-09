@@ -282,7 +282,25 @@ function latestCourseReview(data: AppData, courseId: string) {
 export class AuthService {
   static async boot() {
     await initializeDatabase();
-    return getAllData();
+    const data = await getAllData();
+    const catalogVersion = Number(data.applicationSettings.find((setting) => setting.key === "catalogContentVersion")?.value ?? 0);
+    if (catalogVersion >= 4) return data;
+
+    const session = this.getSession();
+    const activeEmail = session ? data.users.find((user) => user.id === session.userId)?.email : undefined;
+    const fresh = createSeedData();
+    await replaceAllData(fresh);
+
+    if (session && activeEmail) {
+      const remappedUser = fresh.users.find((user) => user.email === activeEmail);
+      if (remappedUser) {
+        const sessions = JSON.parse(localStorage.getItem(sessionStoreKey) ?? "{}") as Record<string, Session>;
+        sessions[session.sessionId] = { ...session, userId: remappedUser.id, organizationId: remappedUser.organizationId, lastActivityAt: now() };
+        localStorage.setItem(sessionStoreKey, JSON.stringify(sessions));
+      }
+    }
+
+    return fresh;
   }
 
   static getSession(): Session | undefined {

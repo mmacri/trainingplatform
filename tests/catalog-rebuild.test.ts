@@ -12,7 +12,7 @@ describe("rebuilt NERC CIP catalog", () => {
     expect(data.courses.some((course) => course.id !== "course-cip004-annual-refresher" && course.title.includes("Annual Refresher"))).toBe(false);
     expect(data.courses.find((course) => course.id === "course-cip004-supervisor-workshop")?.title).toBe("CIP-004 — Supervisor & Access Owner Workshop");
     expect(visibleCatalog.length).toBeGreaterThanOrEqual(18);
-    expect(data.applicationSettings.find((setting) => setting.key === "catalogContentVersion")?.value).toBe(3);
+    expect(data.applicationSettings.find((setting) => setting.key === "catalogContentVersion")?.value).toBe(4);
   });
 
   it("gives every rebuilt visible catalog course authored curriculum, assessment, resources, and mapping", () => {
@@ -27,13 +27,26 @@ describe("rebuilt NERC CIP catalog", () => {
       const assessment = data.assessments.find((item) => item.courseVersionId === version.id);
       const questions = assessment ? data.assessmentQuestions.filter((item) => item.assessmentId === assessment.id) : [];
 
-      expect(lessons.length, course.title).toBeGreaterThanOrEqual(5);
+      const substantiveLessons = lessons.filter((lesson) => !["Final Assessment", "Completion Summary"].includes(lesson.title));
+      const interactionBlocks = blocks.filter((block) => ["knowledge_check", "classification", "evidence_builder", "scenario", "process_diagram", "timeline"].includes(block.type));
+      const minimumLessons = course.estimatedMinutes <= 40 ? 6 : course.estimatedMinutes < 70 ? 8 : 10;
+      const minimumInteractions = course.estimatedMinutes <= 40 ? 3 : course.estimatedMinutes < 70 ? 4 : 5;
+      const minimumQuestions = course.estimatedMinutes <= 40 ? 8 : course.estimatedMinutes < 70 ? 10 : 12;
+
+      expect(substantiveLessons.length, course.title).toBeGreaterThanOrEqual(minimumLessons);
       expect(blocks.length, course.title).toBeGreaterThanOrEqual(18);
-      expect(blocks.some((block) => ["knowledge_check", "classification", "evidence_builder", "scenario", "process_diagram", "timeline"].includes(block.type)), course.title).toBe(true);
-      const expectedMinimum = course.title.includes("Supervisor") ? 8 : course.estimatedMinutes < 45 ? 8 : 10;
-      expect(questions.length, course.title).toBeGreaterThanOrEqual(expectedMinimum);
+      expect(interactionBlocks.length, course.title).toBeGreaterThanOrEqual(minimumInteractions);
+      expect(questions.length, course.title).toBeGreaterThanOrEqual(minimumQuestions);
       expect(data.courseResources.filter((resource) => resource.courseId === course.id).length, course.title).toBeGreaterThanOrEqual(3);
       expect(data.courseStandardMappings.some((mapping) => mapping.courseId === course.id), course.title).toBe(true);
+
+      const prompts = questions
+        .map((item) => data.questions.find((question) => question.id === item.questionId)?.prompt ?? "")
+        .map((prompt) => prompt.toLowerCase().replace(/\s+/g, " ").trim());
+      const duplicateRatio = 1 - new Set(prompts).size / prompts.length;
+      expect(duplicateRatio, course.title).toBeLessThanOrEqual(0.1);
+      expect(prompts.join("\n"), course.title).not.toMatch(/application \d+:/i);
+      expect(prompts.join("\n"), course.title).not.toContain("select the action that best supports compliance");
     }
   });
 
