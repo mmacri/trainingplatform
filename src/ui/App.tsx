@@ -27,7 +27,7 @@ import {
   UsersRound,
   X
 } from "lucide-react";
-import { type FormEvent, useEffect, useMemo, useState } from "react";
+import { type FormEvent, type ReactNode, useEffect, useMemo, useState } from "react";
 import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { addDays, formatDistanceToNow } from "date-fns";
@@ -55,10 +55,14 @@ import {
   searchAuthorized
 } from "../services/appServices";
 import { ContentHealthService } from "../services/contentHealthService";
+import { ArtifactService } from "../services/artifactService";
 import { LearnerJourneyService, type LearnerJourneyAction } from "../services/learnerJourneyService";
+import { LearnerGoalService } from "../services/learnerGoalService";
 import { LearningSearchService } from "../services/learningSearchService";
 import { LearningSessionService } from "../services/learningSessionService";
+import { LearningTimeService } from "../services/learningTimeService";
 import { SkillCompetencyService } from "../services/skillMasteryService";
+import { TrainingWorldService } from "../services/trainingWorldService";
 import { AppContext, type Toast, useApp } from "./appContext";
 import { AssignmentWizard, CourseCreationWizard, CourseManagementDashboard, CourseWorkspace } from "./course-management/CourseManagement";
 
@@ -364,10 +368,14 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/learning-map" element={<LearningMapPage />} />
             <Route path="/settings/learning" element={<LearningSettingsPage />} />
             <Route path="/campaigns/:campaignId" element={<CampaignLearnerPage />} />
+            <Route path="/environment" element={<EnvironmentExplorer />} />
             <Route path="/courses/:courseId" element={<CourseLanding />} />
+            <Route path="/courses/:courseId/reference" element={<CourseReferencePage />} />
             <Route path="/learn/:courseId/:lessonId?" element={<CoursePlayer />} />
+            <Route path="/goals" element={<LearnerGoalsPage />} />
             <Route path="/resources" element={<ResourceCenter />} />
             <Route path="/resources/:resourceId" element={<ResourceDetail />} />
+            <Route path="/progress/portfolio" element={<LearnerPortfolioPage />} />
             <Route path="/records/:courseId" element={<TrainingRecord />} />
             <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
             <Route path="/build/practice" element={<Guard allow={canManageCourses(data, user.id)} label="Practice Activities"><PracticeAuthoring /></Guard>} />
@@ -642,7 +650,8 @@ function ProgressHome() {
     ...data.branchingScenarioAttempts.filter((item) => item.userId === user.id && item.completedAt).map((item) => ({ date: item.completedAt!, label: data.scenarioDefinitions.find((scenario) => scenario.id === item.scenarioId)?.title ?? "Scenario", type: "Scenario Completed", result: item.overallResult })),
     ...data.userCertifications.filter((item) => item.userId === user.id).map((item) => ({ date: item.issuedAt, label: data.certifications.find((cert) => cert.id === item.certificationId)?.name ?? "Certificate", type: "Certificate Earned", result: "ACTIVE" }))
   ].sort((left, right) => new Date(right.date).getTime() - new Date(left.date).getTime());
-  return <><PageHeader title="Progress" subtitle="Skills, certificates, transcript, activity, and achievements." /><Tabs items={["Skills", "Certificates", "Transcript", "Activity", "Achievements"]} active={tab} onChange={setTab} />{tab === "Skills" ? <div className="mt-4"><SkillsPage /></div> : null}{tab === "Certificates" ? <div className="mt-4"><Certifications /></div> : null}{tab === "Transcript" ? <TranscriptPanel /> : null}{tab === "Activity" ? <Panel className="mt-4"><div className="space-y-2">{activity.map((item) => <div key={`${item.type}-${item.label}-${item.date}`} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{item.label}</p><p className="text-muted-foreground">{item.type} · {String(item.result).replaceAll("_", " ")} · {new Date(item.date).toLocaleDateString()}</p></div>)}{!activity.length ? <p className="text-sm text-muted-foreground">Meaningful learning activity will appear here.</p> : null}</div></Panel> : null}{tab === "Achievements" ? <Panel className="mt-4"><div className="grid gap-3 md:grid-cols-2">{data.learnerAchievements.filter((item) => item.userId === user.id).map((achievement) => <div key={achievement.id} className="rounded-md border border-border p-3"><p className="font-medium">{achievement.title}</p><p className="text-sm text-muted-foreground">{achievement.description}</p></div>)}</div></Panel> : null}</>;
+  const saved = data.savedLearningItems.filter((item) => item.userId === user.id);
+  return <><PageHeader title="Progress" subtitle="Skills, certificates, transcript, activity, and achievements." action={<Link className="rounded-md border border-border px-3 py-2 text-sm" to="/progress/portfolio">Portfolio</Link>} /><Tabs items={["Skills", "Certificates", "Transcript", "Activity", "Saved", "Achievements"]} active={tab} onChange={setTab} />{tab === "Skills" ? <div className="mt-4"><SkillsPage /></div> : null}{tab === "Certificates" ? <div className="mt-4"><Certifications /></div> : null}{tab === "Transcript" ? <TranscriptPanel /> : null}{tab === "Activity" ? <Panel className="mt-4"><div className="space-y-2">{activity.map((item) => <div key={`${item.type}-${item.label}-${item.date}`} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{item.label}</p><p className="text-muted-foreground">{item.type} · {String(item.result).replaceAll("_", " ")} · {new Date(item.date).toLocaleDateString()}</p></div>)}{!activity.length ? <p className="text-sm text-muted-foreground">Meaningful learning activity will appear here.</p> : null}</div></Panel> : null}{tab === "Saved" ? <Panel className="mt-4"><div className="space-y-2">{saved.map((item) => <Link key={item.id} className="block rounded-md border border-border p-3 text-sm" to={item.href}><span className="font-medium">{item.title}</span><span className="block text-xs text-muted-foreground">{item.targetType} · saved {new Date(item.createdAt).toLocaleDateString()}</span></Link>)}{!saved.length ? <p className="text-sm text-muted-foreground">Saved lessons, sections, resources, scenarios, and practice activities will appear here.</p> : null}</div></Panel> : null}{tab === "Achievements" ? <Panel className="mt-4"><div className="grid gap-3 md:grid-cols-2">{data.learnerAchievements.filter((item) => item.userId === user.id).map((achievement) => <div key={achievement.id} className="rounded-md border border-border p-3"><p className="font-medium">{achievement.title}</p><p className="text-sm text-muted-foreground">{achievement.description}</p></div>)}</div></Panel> : null}</>;
 }
 
 function LibraryPage() {
@@ -833,9 +842,10 @@ function CourseLanding() {
   const lessons = sortedLessons(data, version.id);
   const state = getCourseCompletionState(data, user.id, course.id);
   const hero = course.id === "course-cip004-annual-refresher";
+  const contextEntities = TrainingWorldService.courseEntities(data, course);
   return (
     <>
-      <PageHeader title={course.title} subtitle={course.subtitle ?? course.shortDescription} action={<Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={state.resumeDestination}>{state.percent ? "Resume Course" : "Start Course"}</Link>} />
+      <PageHeader title={course.title} subtitle={course.subtitle ?? course.shortDescription} action={<div className="flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-4 py-2 text-sm font-medium text-white" to={state.resumeDestination}>{state.percent ? "Resume Course" : "Start Course"}</Link>{state.courseComplete ? <Link className="rounded-md border border-border px-4 py-2 text-sm" to={`/courses/${course.id}/reference`}>Use at Work</Link> : null}</div>} />
       <div className="grid gap-5 xl:grid-cols-[1fr_320px]">
         <Panel>
           {hero ? <p className="mb-2 text-xs font-semibold uppercase tracking-wide text-cyan-700">NERC CIP Training</p> : null}
@@ -844,6 +854,16 @@ function CourseLanding() {
           <div className="mt-5 grid gap-3 md:grid-cols-3">
             {(hero ? ["75 min", course.difficulty, "Annual Training", "Certificate", "CIP-004", "Final Assessment"] : [`${course.estimatedMinutes} min`, course.difficulty, course.category, course.certificateEnabled ? "Certificate" : "No certificate", version.version, course.status]).map((item) => <div key={item} className="rounded-md border border-border bg-muted/40 p-3 text-sm font-medium">{item}</div>)}
           </div>
+          {contextEntities.length ? (
+            <div className="mt-6 rounded-md border border-cyan-200 bg-cyan-50/60 p-4 dark:border-cyan-900 dark:bg-cyan-950/30">
+              <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Training Context</p>
+              <h2 className="mt-1 text-lg font-semibold">North Valley Energy</h2>
+              <p className="mt-2 text-sm text-muted-foreground">This course uses a fictional utility training world so systems, people, vendors, and evidence recur across lessons.</p>
+              <div className="mt-3 flex flex-wrap gap-2">
+                {contextEntities.slice(0, 5).map((entity) => <Link key={`${entity.kind}-${entity.item.id}`} className="rounded-md border border-border bg-background px-3 py-2 text-xs" to="/environment">{entity.item.name}</Link>)}
+              </div>
+            </div>
+          ) : null}
           {hero ? (
             <div className="mt-6">
               <h2 className="text-lg font-semibold">Why you're taking this course</h2>
@@ -909,6 +929,8 @@ function CoursePlayer() {
   const [notesOpen, setNotesOpen] = useState(false);
   const [resourcesOpen, setResourcesOpen] = useState(false);
   const [coachOpen, setCoachOpen] = useState(false);
+  const [contextOpen, setContextOpen] = useState(false);
+  const [stoppingPoint, setStoppingPoint] = useState(false);
   const course = data.courses.find((item) => item.id === courseId);
   if (!course) return <NotFound />;
   const access = canAccessCourse(data, user.id, course.id);
@@ -922,13 +944,29 @@ function CoursePlayer() {
   const bookmarked = Boolean(data.lessonProgress.find((progress) => progress.userId === user.id && progress.lessonId === lesson.id && (progress as unknown as { bookmarked?: boolean }).bookmarked));
   const isAssessment = lesson.title.toLowerCase().includes("final assessment");
   const isAcknowledgement = lesson.title.toLowerCase().includes("acknowledgement");
+  const currentModule = data.modules.find((module) => module.id === lesson.moduleId);
+  const moduleLessons = lessons.filter((item) => item.moduleId === lesson.moduleId);
+  const lessonIndexInModule = moduleLessons.findIndex((item) => item.id === lesson.id) + 1;
+  const isLastInModule = moduleLessons.at(-1)?.id === lesson.id;
+  const contextEntities = TrainingWorldService.courseEntities(data, course);
+  const courseRemaining = LearningTimeService.estimateCourseRemaining(data, course.id, user.id);
+  const moduleRemaining = currentModule ? LearningTimeService.estimateModuleRemaining(data, currentModule.id, user.id) : 0;
+  const lessonRemaining = LearningTimeService.estimateLessonRemaining(data, lesson, user.id);
+  const stageRows = lesson.instructionalStages?.length
+    ? lesson.instructionalStages
+    : inferLessonStages(blocks);
+  useEffect(() => {
+    const svc = service();
+    void svc.recordExperienceEvent("LESSON_STARTED", lesson.id, { courseId: course.id });
+  }, [course.id, lesson.id]);
   const complete = async () => {
     const svc = service();
     await svc.completeLesson(course.id, lesson.id);
     setData(svc.snapshot());
     toast("Lesson completed");
     const next = lessons[index + 1];
-    if (next) navigate(`/learn/${course.id}/${next.id}`);
+    if (next && isLastInModule) setStoppingPoint(true);
+    else if (next) navigate(`/learn/${course.id}/${next.id}`);
   };
   const saveNote = async (value: string) => {
     setNote(value);
@@ -952,9 +990,6 @@ function CoursePlayer() {
   const requiredActivities = blocks.filter((block) => block.required && block.type !== "knowledge_check");
   const activitiesDone = lessonDone || requiredActivities.every((block) => data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED"));
   const canCompleteLesson = lessonDone || !requiredActivities.length || activitiesDone;
-  const currentModule = data.modules.find((module) => module.id === lesson.moduleId);
-  const moduleLessons = lessons.filter((item) => item.moduleId === lesson.moduleId);
-  const lessonIndexInModule = moduleLessons.findIndex((item) => item.id === lesson.id) + 1;
   const resources = data.courseResources.filter((resource) => resource.courseId === course.id);
   return (
     <div className="fixed inset-0 z-[70] flex flex-col bg-slate-50 text-slate-950 dark:bg-slate-950 dark:text-slate-100">
@@ -965,11 +1000,12 @@ function CoursePlayer() {
             <button className="rounded-md border border-border px-3 py-2 text-sm lg:hidden" onClick={() => setOutlineOpen(true)}>Outline</button>
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{course.shortTitle ?? course.title}</p>
-              <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground"><span>{state.percent}% complete</span><div className="h-1 w-28 rounded-full bg-muted"><div className="h-1 rounded-full bg-cyan-700" style={{ width: `${state.percent}%` }} /></div></div>
+              <div className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground"><span>{state.percent}% complete</span><span>{LearningTimeService.formatApprox(courseRemaining)} remaining</span><div className="h-1 w-28 rounded-full bg-muted"><div className="h-1 rounded-full bg-cyan-700" style={{ width: `${state.percent}%` }} /></div></div>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <button aria-label="Bookmark lesson" className="rounded-md border border-border px-3 py-2 text-sm" onClick={toggleBookmark}>{bookmarked ? "Saved" : "Save"}</button>
+            {contextEntities.length ? <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setContextOpen(true)}>Context</button> : null}
             <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setCoachOpen(true)}>Coach</button>
             <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setNotesOpen(true)}>Notes</button>
             <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => setResourcesOpen(true)}>Resources</button>
@@ -985,10 +1021,11 @@ function CoursePlayer() {
             <div className="mx-auto max-w-[760px]">
               <p className="text-sm font-semibold uppercase tracking-wide text-cyan-700">Module {currentModule?.position ?? 1} · {currentModule?.title ?? course.subcategory}</p>
               <h1 className="mt-2 text-4xl font-semibold tracking-normal text-slate-950 dark:text-white">{lesson.title}</h1>
-              <p className="mt-3 text-base leading-7 text-muted-foreground">{lesson.estimatedMinutes} min · {lesson.required ? "Required" : "Optional"} · Lesson {lessonIndexInModule || index + 1} of {moduleLessons.length || lessons.length}</p>
+              <p className="mt-3 text-base leading-7 text-muted-foreground">{LearningTimeService.formatApprox(lessonRemaining)} · Module {LearningTimeService.formatApprox(moduleRemaining)} left · {lesson.required ? "Required" : "Optional"} · Lesson {lessonIndexInModule || index + 1} of {moduleLessons.length || lessons.length}</p>
               <div className="mt-5 h-1 rounded-full bg-muted"><div className="h-1 rounded-full bg-cyan-700" style={{ width: `${Math.round(((index + 1) / lessons.length) * 100)}%` }} /></div>
+              <LessonStageProgress stages={stageRows} blocks={blocks} />
             </div>
-            {course.id === "course-cip004-annual-refresher" && state.percent > 0 && !sessionStorage.getItem("gridguard.welcomeBack") ? <div className="mx-auto max-w-[760px]"><WelcomeBack percent={state.percent} /></div> : null}
+            {state.percent > 0 && !sessionStorage.getItem("gridguard.welcomeBack") ? <div className="mx-auto max-w-[760px]"><WelcomeBack percent={state.percent} /></div> : null}
             <div className="mx-auto mt-8 max-w-[760px] text-[17px] leading-8">
               {isAssessment ? <AssessmentPanel course={course} /> : isAcknowledgement ? <AcknowledgementPanel course={course} block={blocks.find((block) => block.type === "acknowledgement")} /> : blocks.map((block) => <LessonBlock key={block.id} block={block} courseId={course.id} lessonId={lesson.id} onComplete={completeActivity} />)}
             </div>
@@ -1003,7 +1040,9 @@ function CoursePlayer() {
       </div>
       {notesOpen ? <LearningDrawer title="Notes" onClose={() => setNotesOpen(false)}><textarea className="min-h-64 w-full rounded-md border border-border bg-transparent p-3 text-sm" placeholder="Write a private note..." value={note} onChange={(event) => void saveNote(event.target.value)} /><p className="mt-3 text-xs text-muted-foreground">Private note for {lesson.title}</p></LearningDrawer> : null}
       {coachOpen ? <LearningDrawer title="Learning Coach" onClose={() => setCoachOpen(false)}><LearningCoach lesson={lesson} course={course} /></LearningDrawer> : null}
+      {contextOpen ? <LearningDrawer title="North Valley Context" onClose={() => setContextOpen(false)}><EnvironmentContext entities={contextEntities} /></LearningDrawer> : null}
       {resourcesOpen ? <LearningDrawer title="Resources" onClose={() => setResourcesOpen(false)}><div className="space-y-2">{resources.map((resource) => resource.url?.startsWith("http") ? <a key={resource.id} className="block rounded-md border border-border p-3 text-sm" href={resource.url} target="_blank" rel="noreferrer"><FileText size={15} className="mr-2 inline" />{resource.title}<p className="mt-1 text-xs text-muted-foreground">{resource.description}</p></a> : <Link key={resource.id} className="block rounded-md border border-border p-3 text-sm" to={`/resources/${resource.id}`}><FileText size={15} className="mr-2 inline" />{resource.title}<p className="mt-1 text-xs text-muted-foreground">{resource.description}</p></Link>)}</div></LearningDrawer> : null}
+      {stoppingPoint ? <Modal title="Good Stopping Point" onClose={() => setStoppingPoint(false)}><p className="text-sm text-muted-foreground">You've completed {currentModule?.title ?? "this module"}.</p><p className="mt-3 text-sm">Next: {lessons[index + 1]?.title ?? "Course completion"} · {lessons[index + 1] ? LearningTimeService.formatApprox(lessons[index + 1].estimatedMinutes) : "Complete"}</p><div className="mt-5 flex justify-end gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => navigate("/home")}>Finish Later</button>{lessons[index + 1] ? <button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => navigate(`/learn/${course.id}/${lessons[index + 1].id}`)}>Continue</button> : null}</div></Modal> : null}
     </div>
   );
 }
@@ -1170,6 +1209,42 @@ function WelcomeBack({ percent }: { percent: number }) {
   return <div className="mt-4 rounded-md border border-cyan-200 bg-cyan-50 p-3 text-sm text-cyan-900 dark:border-cyan-900 dark:bg-cyan-950 dark:text-cyan-100">Welcome back. You're {percent}% complete.</div>;
 }
 
+function LessonStageProgress({ stages, blocks }: { stages: NonNullable<AppData["lessons"][number]["instructionalStages"]>; blocks: ContentBlock[] }) {
+  const blockIds = new Set(blocks.map((block) => block.id));
+  return (
+    <div className="mt-4 flex flex-wrap gap-2" aria-label="Lesson stage progress">
+      {stages.map((stage, index) => {
+        const active = stage.blockIds.some((blockId) => blockIds.has(blockId));
+        const state = index === 0 ? "✓" : active ? "●" : "○";
+        return <span key={stage.id} className="rounded-md border border-border bg-background px-2 py-1 text-xs text-muted-foreground">{stage.label} {state}</span>;
+      })}
+    </div>
+  );
+}
+
+function inferLessonStages(blocks: ContentBlock[]) {
+  const first = blocks[0];
+  const visual = blocks.find((block) => ["learning_diagram", "process_diagram", "timeline", "artifact_review", "system_inspector", "evidence_inspector"].includes(block.type));
+  const activity = blocks.find((block) => ["decision_cards", "classification", "sequence_builder", "matching", "knowledge_check", "quick_recall"].includes(block.type));
+  const last = blocks.at(-1);
+  return [
+    first ? { id: "stage-understand", type: "UNDERSTAND" as const, label: "Understand", blockIds: [first.id] } : undefined,
+    visual ? { id: "stage-see", type: "SEE" as const, label: "See It", blockIds: [visual.id] } : undefined,
+    activity ? { id: "stage-try", type: "TRY" as const, label: "Try It", blockIds: [activity.id] } : undefined,
+    last ? { id: "stage-takeaway", type: "TAKEAWAY" as const, label: "Takeaway", blockIds: [last.id] } : undefined
+  ].filter(Boolean) as NonNullable<AppData["lessons"][number]["instructionalStages"]>;
+}
+
+function EnvironmentContext({ entities }: { entities: ReturnType<typeof TrainingWorldService.courseEntities> }) {
+  return <div className="space-y-3">{entities.map((entity) => <div key={`${entity.kind}-${entity.item.id}`} className="rounded-md border border-border p-3 text-sm"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{entity.kind}</p><h3 className="mt-1 font-semibold">{entity.item.name}</h3><p className="mt-1 text-muted-foreground">{entityDescription(entity.item)}</p>{"attributes" in entity.item ? <div className="mt-2 grid gap-1 text-xs text-muted-foreground">{Object.entries(entity.item.attributes).map(([key, value]) => <div key={key}><span className="font-medium">{titleize(key)}:</span> {value}</div>)}</div> : null}</div>)}</div>;
+}
+
+function entityDescription(item: ReturnType<typeof TrainingWorldService.courseEntities>[number]["item"]) {
+  if ("roleSummary" in item) return item.roleSummary;
+  if ("description" in item) return item.description;
+  return "";
+}
+
 function sortedLessons(data: AppData, courseVersionId?: string) {
   const modules = data.modules.filter((module) => module.courseVersionId === courseVersionId);
   const modulePosition = new Map(modules.map((module) => [module.id, module.position]));
@@ -1193,11 +1268,15 @@ function LessonBlock({ block, courseId, lessonId, onComplete }: { block: Content
   if (block.type === "procedure") return <ListBlock title={block.title} items={(data.steps as string[]) ?? []} numbered />;
   if (block.type === "checklist") return <ChecklistBlock title={block.title} items={(data.items as string[]) ?? []} />;
   if (block.type === "process_diagram") return <ProcessBlock title={block.title} stages={(data.stages as string[]) ?? []} caption={data.caption as string} />;
+  if (block.type === "learning_diagram") return <LearningDiagramBlock block={block} />;
   if (block.type === "timeline") return <TimelineBlock title={block.title} steps={(data.steps as string[]) ?? []} />;
   if (block.type === "audit_lens" || block.type === "audit_tip") return <AuditLensBlock block={block} />;
   if (block.type === "before_after" || block.type === "comparison") return <BeforeAfterBlock block={block} />;
   if (block.type === "system_inspector") return <InspectorActivity block={block} onComplete={onComplete} kind="system" />;
   if (block.type === "evidence_inspector" || block.type === "build_record") return <InspectorActivity block={block} onComplete={onComplete} kind="evidence" />;
+  if (block.type === "artifact_review" || block.type === "investigation_activity") return <ArtifactReviewBlock block={block} onComplete={onComplete} />;
+  if (block.type === "record_repair") return <RecordRepairBlock block={block} onComplete={onComplete} />;
+  if (block.type === "quality_comparison") return <QualityComparison block={block} />;
   if (block.type === "network_explorer" || block.type === "coverage_map") return <NetworkExplorerBlock block={block} onComplete={onComplete} />;
   if (block.type === "sequence_builder" || block.type === "ordering") return <SequenceBuilderBlock block={block} onComplete={onComplete} />;
   if (block.type === "decision_cards" || block.type === "quick_recall") return <DecisionCardsBlock block={block} onComplete={onComplete} />;
@@ -1236,6 +1315,32 @@ function ProcessBlock({ title, stages, caption }: { title?: string; stages: stri
   return <div className="mb-4 rounded-md border border-border p-4"><h3 className="font-semibold">{title}</h3><div className="mt-3 grid gap-2 md:grid-cols-6">{stages.map((stage) => <div key={stage} className="rounded-md bg-cyan-50 p-3 text-center text-xs font-medium text-cyan-900 dark:bg-cyan-950 dark:text-cyan-100">{stage}</div>)}</div>{caption ? <p className="mt-3 text-sm text-muted-foreground">{caption}</p> : null}</div>;
 }
 
+function LearningDiagramBlock({ block }: { block: ContentBlock }) {
+  const { data } = useApp();
+  const config = block.data as { diagramId?: string } | undefined;
+  const diagram = data.learningDiagrams.find((item) => item.id === config?.diagramId);
+  const [activeId, setActiveId] = useState(diagram?.nodes[0]?.id);
+  if (!diagram) return <MalformedActivity title={block.title ?? "Learning Diagram"} />;
+  const active = diagram.nodes.find((node) => node.id === activeId) ?? diagram.nodes[0];
+  return (
+    <div className="mb-5 rounded-md border border-border bg-background p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{diagram.type.replaceAll("_", " ")}</p>
+      <h3 className="mt-1 text-lg font-semibold">{block.title ?? diagram.title}</h3>
+      <p className="mt-2 text-sm text-muted-foreground">{block.body ?? diagram.description}</p>
+      <div className="mt-4 grid gap-2 md:grid-cols-[1fr_260px]">
+        <div className="grid gap-2 md:grid-cols-3">
+          {diagram.nodes.map((node, index) => <button key={node.id} className={`min-h-16 rounded-md border p-3 text-left text-sm ${active?.id === node.id ? "border-cyan-700 bg-cyan-50 text-cyan-950 dark:bg-cyan-950 dark:text-cyan-100" : "border-border"}`} onClick={() => setActiveId(node.id)}><span className="text-xs text-muted-foreground">Step {index + 1}</span><span className="block font-medium">{node.label}</span>{node.subtitle ? <span className="text-xs text-muted-foreground">{node.subtitle}</span> : null}</button>)}
+        </div>
+        <div className="rounded-md border border-border bg-muted/30 p-3 text-sm">
+          <p className="font-semibold">{active?.label}</p>
+          <p className="mt-2 text-muted-foreground">{active?.description}</p>
+          {active?.metadata ? <dl className="mt-3 space-y-1 text-xs text-muted-foreground">{Object.entries(active.metadata).map(([key, value]) => <div key={key}><dt className="inline font-medium">{titleize(key)}: </dt><dd className="inline">{value}</dd></div>)}</dl> : null}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function TimelineBlock({ title, steps }: { title?: string; steps: string[] }) {
   return <div className="mb-4 rounded-md border border-border p-4"><h3 className="font-semibold">{title}</h3><ol className="mt-3 space-y-3">{steps.map((step, index) => <li key={step} className="flex gap-3 text-sm"><span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cyan-700 text-xs text-white">{index + 1}</span><span>{step}</span></li>)}</ol></div>;
 }
@@ -1264,6 +1369,72 @@ function InspectorActivity({ block, onComplete, kind }: { block: ContentBlock; o
     if (ok) await onComplete(block.id, { selected }, 100);
   };
   return <div className="mb-5 rounded-md border border-border bg-background p-4"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{kind === "system" ? "System Inspector" : "Evidence Inspector"}</p><h3 className="mt-1 text-lg font-semibold">{block.title ?? (kind === "system" ? "Inspect the System" : "Inspect the Record")}</h3><p className="mt-2 text-sm text-muted-foreground">{config.prompt ?? "Select the items that deserve further review."}</p><div className="mt-4 space-y-2">{fields.map((field, index) => <label key={`${field.label}-${index}`} className="flex min-h-12 items-start gap-3 rounded-md border border-border p-3 text-sm"><input className="mt-1" type="checkbox" checked={selected.includes(index)} onChange={(event) => setSelected((items) => event.target.checked ? [...items, index] : items.filter((item) => item !== index))} /><span><span className="block font-medium">{field.label}</span><span className="text-muted-foreground">{field.value}</span></span></label>)}</div>{saved ? <p className="mt-3 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">Required activity complete.</p> : <button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={check}>Review Selection</button>}</div>;
+}
+
+function ArtifactReviewBlock({ block, onComplete }: { block: ContentBlock; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
+  const { data, user } = useApp();
+  const config = block.data as { artifactId?: string } | undefined;
+  const artifact = data.trainingArtifacts.find((item) => item.id === config?.artifactId);
+  const saved = data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED");
+  const [selected, setSelected] = useState<string[]>([]);
+  const [result, setResult] = useState<ReturnType<typeof ArtifactService.review> | null>(null);
+  if (!artifact) return <MalformedActivity title={block.title ?? "Artifact Review"} />;
+  const submit = async () => {
+    const review = ArtifactService.review(artifact, selected);
+    setResult(review);
+    const expected = artifact.issues?.filter((issue) => issue.learnerShouldIdentify).length ?? 0;
+    const score = expected ? Math.round((review.identified.length / expected) * 100) : 100;
+    await onComplete(block.id, { selected, result: review }, score);
+  };
+  return (
+    <div className="mb-5 rounded-md border border-border bg-background p-4">
+      <p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{artifact.artifactType.replaceAll("_", " ")}</p>
+      <h3 className="mt-1 text-lg font-semibold">{block.title ?? artifact.title}</h3>
+      <p className="mt-2 text-sm text-muted-foreground">{block.body ?? artifact.subtitle}</p>
+      <div className="mt-4 rounded-md border border-border">
+        {artifact.fields.map((field) => <label key={field.id} className="flex min-h-12 items-start gap-3 border-b border-border p-3 text-sm last:border-b-0"><input className="mt-1" type="checkbox" checked={selected.includes(field.id)} onChange={(event) => setSelected((items) => event.target.checked ? [...items, field.id] : items.filter((item) => item !== field.id))} /><span><span className="block font-medium">{field.label}</span><span className="text-muted-foreground">{field.value}</span>{field.traceabilityRole ? <span className="mt-1 block text-xs text-muted-foreground">{field.traceabilityRole}</span> : null}</span></label>)}
+      </div>
+      {result ? <ArtifactResult result={result} /> : saved ? <p className="mt-3 rounded-md bg-emerald-50 p-3 text-sm text-emerald-800 dark:bg-emerald-950 dark:text-emerald-200">Artifact review complete.</p> : <button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={submit}>Submit Findings</button>}
+    </div>
+  );
+}
+
+function ArtifactResult({ result }: { result: ReturnType<typeof ArtifactService.review> }) {
+  return <div className="mt-4 rounded-md border border-border bg-muted/30 p-4 text-sm"><p className="font-semibold">Review Complete</p><div className="mt-3 grid gap-3 md:grid-cols-3"><FindingList title="You identified" items={result.identified} /><FindingList title="You missed" items={result.missed} /><FindingList title="Needs context" items={result.needsContext} /></div>{result.falsePositives.length ? <FindingList title="Not shown as a concern" items={result.falsePositives} /> : null}</div>;
+}
+
+function FindingList({ title, items }: { title: string; items: Array<{ label: string; explanation: string }> }) {
+  return <div><p className="font-medium">{title}</p>{items.length ? <ul className="mt-2 space-y-2">{items.map((item) => <li key={item.label} className="rounded-md bg-background p-2"><span className="font-medium">{item.label}</span><span className="mt-1 block text-xs text-muted-foreground">{item.explanation}</span></li>)}</ul> : <p className="mt-2 text-xs text-muted-foreground">None.</p>}</div>;
+}
+
+function RecordRepairBlock({ block, onComplete }: { block: ContentBlock; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
+  const { data, user } = useApp();
+  const config = block.data as { artifactId?: string; requiredFieldIds?: string[] } | undefined;
+  const artifact = data.trainingArtifacts.find((item) => item.id === config?.artifactId);
+  const saved = data.scenarioAttempts.some((attempt) => attempt.userId === user.id && attempt.scenarioId === block.id && attempt.status === "COMPLETED");
+  const [selected, setSelected] = useState<string[]>([]);
+  const issueFieldIds = (artifact?.issues?.map((issue) => issue.fieldId).filter(Boolean) ?? []) as string[];
+  const required = config?.requiredFieldIds ?? issueFieldIds;
+  if (!artifact) return <MalformedActivity title={block.title ?? "Record Repair"} />;
+  const complete = async () => {
+    const ok = required.every((fieldId) => selected.includes(fieldId));
+    if (ok) await onComplete(block.id, { selected, preview: ArtifactService.repairedPreview(artifact, selected) }, 100);
+  };
+  const preview = ArtifactService.repairedPreview(artifact, selected);
+  return <div className="mb-5 rounded-md border border-border p-4"><h3 className="text-lg font-semibold">{block.title ?? "Fix the Record"}</h3><p className="mt-2 text-sm text-muted-foreground">{block.body ?? "Choose the fields that make the record traceable."}</p><div className="mt-4 grid gap-2 md:grid-cols-2">{artifact.fields.map((field) => <label key={field.id} className="flex gap-2 rounded-md border border-border p-3 text-sm"><input type="checkbox" checked={selected.includes(field.id)} onChange={(event) => setSelected((items) => event.target.checked ? [...items, field.id] : items.filter((item) => item !== field.id))} />{field.label}</label>)}</div><div className="mt-4 rounded-md bg-muted/40 p-3 text-sm"><p className="font-medium">Improved record preview</p><ul className="mt-2 list-disc pl-5 text-muted-foreground">{preview.map((line) => <li key={line}>{line}</li>)}</ul></div>{saved ? <p className="mt-3 text-sm text-emerald-700">Record repair complete.</p> : <button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white disabled:opacity-50" disabled={!required.every((fieldId) => selected.includes(fieldId))} onClick={complete}>Complete Repair</button>}</div>;
+}
+
+function QualityComparison({ block }: { block: ContentBlock }) {
+  const data = block.data as { examples?: Array<{ id: string; label: string; content: string; quality: string; explanation: string }>; prompt?: string } | undefined;
+  const examples = data?.examples ?? [
+    { id: "weak", label: "Weak", content: "Approved.", quality: "WEAK", explanation: "The record does not show who, what, why, scope, duration, or approver." },
+    { id: "strong", label: "Stronger", content: "Riley Patel approved temporary access to OPS-SRV-12 for patch validation from Sep 9-13.", quality: "STRONG", explanation: "The record connects person, system, purpose, scope, duration, and approval." }
+  ];
+  return <div className="mb-5 rounded-md border border-border p-4"><h3 className="font-semibold">{block.title ?? "Good vs Better"}</h3>{data?.prompt ? <p className="mt-2 text-sm text-muted-foreground">{data.prompt}</p> : null}<div className="mt-3 grid gap-3 md:grid-cols-2">{examples.map((example) => <div key={example.id} className="rounded-md border border-border bg-muted/30 p-3 text-sm"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{example.quality}</p><h4 className="mt-1 font-semibold">{example.label}</h4><p className="mt-2">{example.content}</p><p className="mt-2 text-muted-foreground">{example.explanation}</p></div>)}</div></div>;
+}
+
+function MalformedActivity({ title }: { title: string }) {
+  return <div className="mb-5 rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100"><p className="font-semibold">{title}</p><p className="mt-1">This learning activity could not be loaded. Continue the course and notify the course owner if this persists.</p></div>;
 }
 
 function NetworkExplorerBlock({ block, onComplete }: { block: ContentBlock; onComplete: (blockId: string, answers: unknown, score?: number) => Promise<void> }) {
@@ -1602,7 +1773,7 @@ function PracticeDecision({ block, value, onChange }: { block: AppData["practice
 function ScenarioLab() {
   const { data } = useApp();
   const categories = Array.from(new Set(data.scenarioDefinitions.map((scenario) => scenario.category)));
-  return <><PageHeader title="Scenario Lab" subtitle="Practice making cybersecurity and compliance decisions in realistic situations." /><div className="grid gap-4 md:grid-cols-4">{["Personnel", "Access", "System Security", "Incident Response"].map((label) => <Panel key={label}><p className="font-semibold">{label}</p><p className="text-sm text-muted-foreground">{data.scenarioDefinitions.filter((scenario) => scenario.category.includes(label)).length} scenarios</p></Panel>)}</div><div className="mt-5 space-y-5">{categories.map((category) => <section key={category}><h2 className="mb-3 text-lg font-semibold">{category}</h2><div className="grid gap-4 lg:grid-cols-2">{data.scenarioDefinitions.filter((scenario) => scenario.category === category).map((scenario) => <ScenarioCard key={scenario.id} scenario={scenario} />)}</div></section>)}</div></>;
+  return <><PageHeader title="Scenario Lab" subtitle="Practice making cybersecurity and compliance decisions in realistic situations." /><div className="grid gap-4 md:grid-cols-4">{["Personnel", "Access", "System Security", "Incident Response"].map((label) => <Panel key={label}><p className="font-semibold">{label}</p><p className="text-sm text-muted-foreground">{data.scenarioDefinitions.filter((scenario) => scenario.category.includes(label)).length} scenarios</p></Panel>)}</div>{data.scenarioSeries.length ? <section className="mt-5"><h2 className="mb-3 text-lg font-semibold">Investigation Series</h2><div className="grid gap-4 lg:grid-cols-2">{data.scenarioSeries.map((series) => <Panel key={series.id}><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Scenario Series</p><h3 className="mt-2 font-semibold">{series.title}</h3><p className="mt-1 text-sm text-muted-foreground">{series.description}</p><div className="mt-3 space-y-2">{series.scenarioIds.map((scenarioId, index) => { const scenario = data.scenarioDefinitions.find((item) => item.id === scenarioId); return scenario ? <Link key={scenario.id} className="block rounded-md border border-border p-2 text-sm" to={`/scenarios/${scenario.id}`}>{index + 1}. {scenario.title}</Link> : null; })}</div></Panel>)}</div></section> : null}<div className="mt-5 space-y-5">{categories.map((category) => <section key={category}><h2 className="mb-3 text-lg font-semibold">{category}</h2><div className="grid gap-4 lg:grid-cols-2">{data.scenarioDefinitions.filter((scenario) => scenario.category === category).map((scenario) => <ScenarioCard key={scenario.id} scenario={scenario} />)}</div></section>)}</div></>;
 }
 
 function ScenarioCard({ scenario }: { scenario: AppData["scenarioDefinitions"][number] }) {
@@ -1685,7 +1856,60 @@ function SimulationRecords({ type, flags, onAction }: { type?: AppData["scenario
 }
 
 function ScenarioResult({ scenario, attempt }: { scenario: AppData["scenarioDefinitions"][number]; attempt: AppData["branchingScenarioAttempts"][number] }) {
-  return <><PageHeader title="Scenario Complete" subtitle={scenario.title} /><Panel><h2 className="text-2xl font-semibold">Overall: {attempt.overallResult.replaceAll("_", " ")}</h2><div className="mt-4 grid gap-4 lg:grid-cols-2"><div><h3 className="font-semibold">Strong decisions</h3><ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{attempt.decisions.filter((decision) => decision.quality === "RECOMMENDED").map((decision) => <li key={`${decision.stepId}-${decision.choiceId}`}>{decision.feedback}</li>)}</ul></div><div><h3 className="font-semibold">Review opportunities</h3><ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{attempt.decisions.filter((decision) => decision.quality !== "RECOMMENDED").map((decision) => <li key={`${decision.stepId}-${decision.choiceId}`}>{decision.feedback}</li>)}</ul></div></div><div className="mt-5 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/scenarios/${scenario.id}`}>Replay</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/practice">Recommended Practice</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/scenarios">Return to Scenario Lab</Link></div></Panel></>;
+  const strong = attempt.decisions.filter((decision) => decision.quality === "RECOMMENDED");
+  const review = attempt.decisions.filter((decision) => decision.quality !== "RECOMMENDED");
+  const flags = attempt.simulationState?.flags ?? [];
+  return <><PageHeader title="Scenario Complete" subtitle={scenario.title} /><Panel><h2 className="text-2xl font-semibold">Overall: {attempt.overallResult.replaceAll("_", " ")}</h2><div className="mt-4 grid gap-4 lg:grid-cols-2"><div><h3 className="font-semibold">Strong decisions</h3><ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{strong.map((decision) => <li key={`${decision.stepId}-${decision.choiceId}`}>{decision.feedback}</li>)}</ul></div><div><h3 className="font-semibold">Review opportunities</h3><ul className="mt-2 list-disc pl-5 text-sm text-muted-foreground">{review.map((decision) => <li key={`${decision.stepId}-${decision.choiceId}`}>{decision.feedback}</li>)}</ul>{!review.length ? <p className="mt-2 text-sm text-muted-foreground">No major review opportunities in this attempt.</p> : null}</div></div></Panel><div className="mt-5 grid gap-4 lg:grid-cols-2"><Panel><h3 className="font-semibold">What Happened</h3><p className="mt-2 text-sm text-muted-foreground">{scenario.description}</p></Panel><Panel><h3 className="font-semibold">What You Noticed</h3><p className="mt-2 text-sm text-muted-foreground">{flags.length ? flags.join(", ") : "Your decisions and inspections were recorded for review."}</p></Panel><Panel><h3 className="font-semibold">What Mattered</h3><p className="mt-2 text-sm text-muted-foreground">The strongest scenarios preserve known facts, verify context, use approved escalation, and retain a defensible record.</p></Panel><Panel><h3 className="font-semibold">Practitioner Perspective</h3><p className="mt-2 text-sm text-muted-foreground">An experienced practitioner usually distinguishes unknown, needs verification, potential concern, and confirmed issue before drawing a final conclusion.</p></Panel></div><Panel className="mt-5"><h3 className="font-semibold">Try This at Work</h3><p className="mt-2 text-sm text-muted-foreground">Identify where this type of record, escalation, or review would be captured in your organization. Save a private follow-up if you need to verify it later.</p><div className="mt-5 flex flex-wrap gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/scenarios/${scenario.id}`}>Replay</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/practice">Recommended Practice</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/scenarios">Return to Scenario Lab</Link></div></Panel></>;
+}
+
+function EnvironmentExplorer() {
+  const { data } = useApp();
+  const world = TrainingWorldService.primaryWorld(data);
+  const [tab, setTab] = useState("Overview");
+  if (!world) return <NotFound />;
+  return <><PageHeader title={world.name} subtitle={world.description} /><Tabs items={["Overview", "People", "Facilities", "Systems", "Vendors", "Relationships"]} active={tab} onChange={setTab} />{tab === "Overview" ? <Panel className="mt-4"><h2 className="text-lg font-semibold">Fictional Training Environment</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">North Valley Energy provides recurring people, systems, facilities, vendors, and evidence artifacts so learners can investigate realistic situations across courses instead of reading isolated examples.</p><div className="mt-4 grid gap-3 md:grid-cols-4"><Info label="People" value={world.people.length} /><Info label="Systems" value={world.systems.length} /><Info label="Facilities" value={world.facilities.length} /><Info label="Vendors" value={world.vendors.length} /></div></Panel> : null}{tab === "People" ? <WorldGrid items={world.people} render={(person) => <><h3 className="font-semibold">{person.name}</h3><p className="text-sm text-muted-foreground">{person.title}</p><p className="mt-2 text-sm">{person.roleSummary}</p></>} /> : null}{tab === "Facilities" ? <WorldGrid items={world.facilities} render={(facility) => <><h3 className="font-semibold">{facility.name}</h3><p className="text-sm text-muted-foreground">{facility.facilityType} · {facility.locationSummary}</p><p className="mt-2 text-sm">{facility.description}</p></>} /> : null}{tab === "Systems" ? <WorldGrid items={world.systems} render={(system) => <><h3 className="font-semibold">{system.name}</h3><p className="text-sm text-muted-foreground">{system.systemType} · Owner: {system.owner}</p><p className="mt-2 text-sm">{system.description}</p><dl className="mt-2 text-xs text-muted-foreground">{Object.entries(system.attributes).map(([key, value]) => <div key={key}><dt className="inline font-medium">{titleize(key)}: </dt><dd className="inline">{value}</dd></div>)}</dl></>} /> : null}{tab === "Vendors" ? <WorldGrid items={world.vendors} render={(vendor) => <><h3 className="font-semibold">{vendor.name}</h3><p className="mt-2 text-sm">{vendor.description}</p><p className="mt-2 text-xs text-muted-foreground">Services: {vendor.services.join(", ")}</p></>} /> : null}{tab === "Relationships" ? <Panel className="mt-4"><div className="space-y-2">{world.relationships.map((relationship) => <div key={relationship.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{relationship.sourceId} → {relationship.targetId}</p><p className="text-muted-foreground">{relationship.label}</p></div>)}</div></Panel> : null}</>;
+}
+
+function WorldGrid<T extends { id: string }>({ items, render }: { items: T[]; render: (item: T) => ReactNode }) {
+  return <div className="mt-4 grid gap-4 lg:grid-cols-2">{items.map((item) => <Panel key={item.id}>{render(item)}</Panel>)}</div>;
+}
+
+function CourseReferencePage() {
+  const { courseId } = useParams();
+  const { data, service, setData, toast } = useApp();
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course) return <NotFound />;
+  const resources = data.learningResources.filter((resource) => resource.relatedCourseIds.includes(course.id));
+  const artifacts = TrainingWorldService.artifactsForCourse(data, course.id);
+  const diagrams = data.learningDiagrams.filter((diagram) => course.storyArc && (diagram.title.toLowerCase().includes(course.shortTitle?.toLowerCase() ?? "") || diagram.relatedCourseIds.includes(course.id))).slice(0, 5);
+  const save = async (title: string, href: string) => {
+    const svc = service();
+    await svc.saveLearningItem({ targetType: "RESOURCE", targetId: href, title, href });
+    setData(svc.snapshot());
+    toast("Saved for later");
+  };
+  return <><PageHeader title={`${course.shortTitle ?? course.title} Reference`} subtitle="Use at Work: concise job aids, diagrams, artifacts, and checklists from this course." action={<button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => window.print()}>Print</button>} /><div className="grid gap-5 xl:grid-cols-[1fr_340px]"><Panel><h2 className="text-lg font-semibold">Quick References</h2><div className="mt-3 grid gap-3 md:grid-cols-2">{resources.map((resource) => <div key={resource.id} className="rounded-md border border-border p-3"><p className="font-medium">{resource.title}</p><p className="mt-1 text-sm text-muted-foreground">{resource.description}</p><div className="mt-3 flex gap-2"><Link className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to={`/resources/${resource.id}`}>Open</Link><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={() => save(resource.title, `/resources/${resource.id}`)}>Save</button></div></div>)}</div>{!resources.length ? <p className="mt-3 text-sm text-muted-foreground">No reusable resources are attached yet.</p> : null}</Panel><Panel><h2 className="text-lg font-semibold">Training Context</h2><EnvironmentContext entities={TrainingWorldService.courseEntities(data, course)} /><Link className="mt-3 inline-flex rounded-md border border-border px-3 py-2 text-sm" to="/environment">Explore North Valley</Link></Panel></div><div className="mt-5 grid gap-5 xl:grid-cols-2"><Panel><h2 className="text-lg font-semibold">Artifacts</h2><div className="mt-3 space-y-2">{artifacts.map((artifact) => <div key={artifact.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{artifact.title}</p><p className="text-muted-foreground">{artifact.subtitle}</p></div>)}{!artifacts.length ? <p className="text-sm text-muted-foreground">No artifacts attached.</p> : null}</div></Panel><Panel><h2 className="text-lg font-semibold">Visual Models</h2><div className="mt-3 space-y-2">{diagrams.map((diagram) => <div key={diagram.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{diagram.title}</p><p className="text-muted-foreground">{diagram.description}</p></div>)}{!diagrams.length ? <p className="text-sm text-muted-foreground">Visual models appear here as the course is expanded.</p> : null}</div></Panel></div><p className="mt-4 text-xs text-muted-foreground">Reference mode is a learning/job-aid view. It does not change course completion, certificate status, or compliance evidence.</p></>;
+}
+
+function LearnerGoalsPage() {
+  const { data, user, service, setData, toast } = useApp();
+  const options = LearnerGoalService.options(data);
+  const goals = LearnerGoalService.activeGoals(data, user.id);
+  const create = async (skillId: string) => {
+    const svc = service();
+    await svc.createLearnerGoal(skillId);
+    setData(svc.snapshot());
+    toast("Learning goal saved");
+  };
+  return <><PageHeader title="Learning Goals" subtitle="Choose a capability you want to strengthen through courses, practice, and scenarios." /><div className="grid gap-4 lg:grid-cols-2">{options.map((option) => <Panel key={option.skillId}><h2 className="font-semibold">{option.label}</h2><p className="mt-1 text-sm text-muted-foreground">{option.skill?.description}</p><button className="mt-3 rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => create(option.skillId)}>Strengthen This</button></Panel>)}</div><h2 className="mt-6 text-lg font-semibold">Active Goals</h2><div className="mt-3 grid gap-4 lg:grid-cols-2">{goals.map((goal) => { const skill = data.skills.find((item) => item.id === goal.skillId); const recs = LearnerGoalService.recommendations(data, goal); return <Panel key={goal.id}><h3 className="font-semibold">{skill?.name ?? goal.skillId}</h3><p className="mt-1 text-sm text-muted-foreground">{skill?.description}</p><div className="mt-3 space-y-2">{recs.practice.map((activity) => <Link key={activity.id} className="block rounded-md border border-border p-2 text-sm" to={`/practice/${activity.id}`}>{activity.title}</Link>)}{recs.scenarios.map((scenario) => <Link key={scenario.id} className="block rounded-md border border-border p-2 text-sm" to={`/scenarios/${scenario.id}`}>{scenario.title}</Link>)}</div></Panel>; })}</div></>;
+}
+
+function LearnerPortfolioPage() {
+  const { data, user } = useApp();
+  const completedCourses = data.enrollments.filter((item) => item.userId === user.id && item.status === "COMPLETED").map((item) => data.courses.find((course) => course.id === item.courseId)).filter(Boolean) as Course[];
+  const scenarios = data.branchingScenarioAttempts.filter((item) => item.userId === user.id && item.completedAt);
+  const practices = data.practiceAttempts.filter((item) => item.userId === user.id && item.completedAt);
+  return <><PageHeader title="Learner Portfolio" subtitle="A private summary of courses, scenarios, practice highlights, skills, and certificates." /><div className="grid gap-5 xl:grid-cols-2"><Panel><h2 className="text-lg font-semibold">Courses</h2><div className="mt-3 space-y-2">{completedCourses.map((course) => <Link key={course.id} className="block rounded-md border border-border p-3 text-sm" to={`/courses/${course.id}`}>{course.title}<span className="block text-xs text-muted-foreground">Completed training</span></Link>)}</div></Panel><Panel><h2 className="text-lg font-semibold">Scenario Highlights</h2><div className="mt-3 space-y-2">{scenarios.map((attempt) => <div key={attempt.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{data.scenarioDefinitions.find((scenario) => scenario.id === attempt.scenarioId)?.title ?? "Scenario"}</p><p className="text-muted-foreground">{attempt.overallResult.replaceAll("_", " ")} · {new Date(attempt.completedAt!).toLocaleDateString()}</p></div>)}</div></Panel><Panel><h2 className="text-lg font-semibold">Practice Highlights</h2><div className="mt-3 space-y-2">{practices.map((attempt) => <div key={attempt.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{data.practiceActivities.find((activity) => activity.id === attempt.practiceActivityId)?.title ?? "Practice"}</p><p className="text-muted-foreground">{attempt.topicResults[0]?.result.replaceAll("_", " ") ?? "Complete"}</p></div>)}</div></Panel><Panel><h2 className="text-lg font-semibold">Certificates</h2><div className="mt-3 space-y-2">{data.userCertifications.filter((cert) => cert.userId === user.id).map((cert) => <div key={cert.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{data.certifications.find((item) => item.id === cert.certificationId)?.name ?? "Certificate"}</p><p className="text-muted-foreground">Issued {new Date(cert.issuedAt).toLocaleDateString()}</p></div>)}</div></Panel></div><p className="mt-4 text-xs text-muted-foreground">Portfolio notes are private in this demo. Managers continue to use Team Learning and Coaching views for organizational status.</p></>;
 }
 
 function RecommendationsPage() {
@@ -2054,7 +2278,7 @@ function LearnerOnboarding({ onClose }: { onClose: () => void }) {
     ["Your First Priority", journey.primaryAction ? `${journey.primaryAction.title}: ${journey.primaryAction.reasonText}` : "You're caught up. Start a short learning session when you are ready."]
   ];
   const [title, body] = screens[step];
-  return <section className="fixed bottom-4 left-4 z-50 w-[calc(100vw-2rem)] max-w-md rounded-md border border-border bg-white p-4 shadow-xl dark:bg-slate-950" aria-label="Onboarding guide"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Welcome</p><h2 className="mt-1 text-lg font-semibold">{title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p><div className="mt-4 flex justify-between gap-2"><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={onClose}>Skip</button><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => step < screens.length - 1 ? setStep(step + 1) : onClose()}>{step < screens.length - 1 ? "Next" : "Start"}</button></div></section>;
+  return <section className="pointer-events-none fixed bottom-4 left-4 z-50 w-[calc(100vw-2rem)] max-w-md rounded-md border border-border bg-white p-4 shadow-xl dark:bg-slate-950" aria-label="Onboarding guide"><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">Welcome</p><h2 className="mt-1 text-lg font-semibold">{title}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{body}</p><div className="mt-4 flex justify-between gap-2"><button className="pointer-events-auto rounded-md border border-border px-3 py-2 text-sm" onClick={onClose}>Skip</button><button className="pointer-events-auto rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={() => step < screens.length - 1 ? setStep(step + 1) : onClose()}>{step < screens.length - 1 ? "Next" : "Start"}</button></div></section>;
 }
 
 function SearchDialog({ onClose }: { onClose: () => void }) {

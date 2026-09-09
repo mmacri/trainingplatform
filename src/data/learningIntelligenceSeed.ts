@@ -1,5 +1,6 @@
 import { addDays, subDays } from "date-fns";
 import type { AppData, LearningResource, PracticeActivity, ScenarioDefinition, Skill } from "./schema";
+import { northValleyArtifacts, northValleyDiagrams, northValleyScenarioSeries, northValleyWorld } from "./training-world/northValleyEnergy";
 
 const demoNow = new Date("2026-09-09T16:00:00.000Z");
 
@@ -194,19 +195,126 @@ export function addLearningIntelligenceSeed(data: AppData) {
   }
 
   addLearningExperience3Seed(data);
+  addLearningExperience4Seed(data);
 
   if (!data.applicationSettings.some((setting) => setting.key === "learningIntelligenceVersion")) {
     data.applicationSettings.push(stamp({ id: "setting_learning_intelligence_version", key: "learningIntelligenceVersion", value: 1 }));
   }
   const experienceSetting = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion");
   if (experienceSetting) {
-    experienceSetting.value = 3;
+    experienceSetting.value = 4;
     experienceSetting.updatedAt = iso(demoNow);
   } else {
-    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 3 }));
+    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 4 }));
   }
 
   return data;
+}
+
+function addLearningExperience4Seed(data: AppData) {
+  upsertById(data.trainingWorlds, stamp(northValleyWorld));
+  northValleyArtifacts.forEach((artifact) => upsertById(data.trainingArtifacts, stamp(artifact)));
+  northValleyDiagrams.forEach((diagram) => upsertById(data.learningDiagrams, stamp(diagram)));
+  northValleyScenarioSeries.forEach((series) => upsertById(data.scenarioSeries, stamp(series)));
+
+  const storyArcs: Record<string, NonNullable<AppData["courses"][number]["storyArc"]>> = {
+    "course-cip002-categorization": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-casey-nguyen"], recurringSystemIds: ["system-ems-app-04"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: [] },
+    "course-cip003-security-management": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-riley-patel", "person-casey-nguyen"], recurringSystemIds: [], recurringFacilityIds: ["facility-corporate-admin"], recurringVendorIds: [] },
+    "course-cip004-annual-refresher": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jordan-lee", "person-morgan-chen", "person-taylor-morgan"], recurringSystemIds: [], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: [] },
+    "course-cip004-foundations": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jordan-lee", "person-taylor-morgan"], recurringSystemIds: [], recurringFacilityIds: [], recurringVendorIds: [] },
+    "course-cip004-supervisor-workshop": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-morgan-chen", "person-jordan-lee"], recurringSystemIds: [], recurringFacilityIds: [], recurringVendorIds: [] },
+    "course-annual-awareness": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-taylor-morgan"], recurringSystemIds: [], recurringFacilityIds: ["facility-corporate-admin"], recurringVendorIds: [] },
+    "course-cip005-esp-access": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera"], recurringSystemIds: ["system-ops-srv-12"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: ["vendor-vector-systems", "vendor-gridtech-services"] },
+    "course-cip006-physical-security": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-taylor-morgan"], recurringSystemIds: [], recurringFacilityIds: ["facility-nv-control-center", "facility-cedar-substation"], recurringVendorIds: ["vendor-gridtech-services"] },
+    "course-cip007-system-security": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera"], recurringSystemIds: ["system-ops-srv-12", "system-ems-app-04"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: ["vendor-vector-systems"] },
+    "course-cip008-incident-response": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera", "person-taylor-morgan"], recurringSystemIds: ["system-eng-ws-22", "system-ops-srv-04"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: [] },
+    "course-cip009-recovery-planning": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera"], recurringSystemIds: ["system-ems-app-04", "system-historian-02"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: [] },
+    "course-cip010-change-vulnerability": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera"], recurringSystemIds: ["system-ops-srv-12", "system-historian-02"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: [] },
+    "course-cip011-information-protection": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-casey-nguyen"], recurringSystemIds: ["system-ems-app-04"], recurringFacilityIds: ["facility-corporate-admin"], recurringVendorIds: [] },
+    "course-cip012-control-center-communications": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera"], recurringSystemIds: ["system-ems-app-04"], recurringFacilityIds: ["facility-nv-control-center", "facility-river-operations"], recurringVendorIds: [] },
+    "course-cip013-supply-chain": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-riley-patel"], recurringSystemIds: ["system-historian-02"], recurringFacilityIds: [], recurringVendorIds: ["vendor-vector-systems", "vendor-gridtech-services"] },
+    "course-cip014-physical-risk": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-casey-nguyen"], recurringSystemIds: [], recurringFacilityIds: ["facility-cedar-substation"], recurringVendorIds: [] },
+    "course-cip015-insm": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-jamie-rivera"], recurringSystemIds: ["system-eng-ws-22", "system-ops-srv-04", "system-historian-02"], recurringFacilityIds: ["facility-nv-control-center"], recurringVendorIds: ["vendor-vector-systems"] },
+    "course-audit-preparation": { worldId: "world-north-valley-energy", recurringPersonIds: ["person-casey-nguyen"], recurringSystemIds: [], recurringFacilityIds: ["facility-corporate-admin"], recurringVendorIds: [] }
+  };
+
+  for (const course of data.courses) {
+    course.storyArc = course.storyArc ?? storyArcs[course.id];
+    addInstructionalStages(data, course.id);
+  }
+
+  addVisualAnchor(data, "course-cip007-system-security", "diagram-cip007-system-lifecycle", "artifact-ops-srv-12-account-inventory", "OPS-SRV-12 System Security Investigation", "Inspect the same North Valley server across services, patches, accounts, and vulnerabilities.");
+  addVisualAnchor(data, "course-cip008-incident-response", "diagram-cip008-incident-timeline", "artifact-incident-timeline-admin", "Incident Timeline Investigation", "Work from known facts before drawing conclusions.");
+  addVisualAnchor(data, "course-cip009-recovery-planning", "diagram-cip009-dependency-map", "artifact-recovery-exercise-ems", "Recovery Dependency Investigation", "Identify missing dependencies before treating a recovery plan as ready.");
+  addVisualAnchor(data, "course-audit-preparation", "diagram-audit-package", "artifact-audit-evidence-package", "Evidence Package Investigation", "Find the defects that would prevent the package from being audit-ready.");
+
+  const taylor = data.users.find((user) => user.email === "learner@gridguard.local");
+  if (taylor && !data.learnerGoals.some((goal) => goal.id === "goal-taylor-evidence-quality")) {
+    data.learnerGoals.push(stamp({ id: "goal-taylor-evidence-quality", userId: taylor.id, skillId: "skill-evidence-quality", createdAt: iso(subDays(demoNow, 2)), status: "ACTIVE" }));
+  }
+}
+
+function upsertById<T extends { id: string; updatedAt?: string }>(items: T[], item: T) {
+  const existing = items.find((candidate) => candidate.id === item.id);
+  if (existing) Object.assign(existing, item);
+  else items.push(item);
+}
+
+function addInstructionalStages(data: AppData, courseId: string) {
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course) return;
+  const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId);
+  for (const lesson of lessons) {
+    const blocks = data.contentBlocks.filter((block) => block.lessonId === lesson.id).sort((left, right) => left.position - right.position);
+    if (!blocks.length || lesson.instructionalStages?.length) continue;
+    const first = blocks[0];
+    const last = blocks[blocks.length - 1];
+    const visual = blocks.find((block) => ["learning_diagram", "process_diagram", "timeline", "system_inspector", "evidence_inspector", "artifact_review", "investigation_activity"].includes(block.type));
+    const activity = blocks.find((block) => ["decision_cards", "classification", "sequence_builder", "matching", "knowledge_check", "quick_recall"].includes(block.type));
+    lesson.instructionalStages = [
+      { id: `${lesson.id}-stage-understand`, type: "UNDERSTAND" as const, label: "Understand", blockIds: [first.id] },
+      { id: `${lesson.id}-stage-see`, type: "SEE" as const, label: "See It", blockIds: visual ? [visual.id] : blocks.slice(1, 2).map((block) => block.id) },
+      { id: `${lesson.id}-stage-try`, type: "TRY" as const, label: "Try It", blockIds: activity ? [activity.id] : [] },
+      { id: `${lesson.id}-stage-takeaway`, type: "TAKEAWAY" as const, label: "Takeaway", blockIds: [last.id] }
+    ].filter((stage) => stage.blockIds.length);
+  }
+}
+
+function addVisualAnchor(data: AppData, courseId: string, diagramId: string, artifactId: string, title: string, body: string) {
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course) return;
+  const lesson = data.lessons
+    .filter((item) => item.courseVersionId === course.currentVersionId)
+    .sort((left, right) => left.position - right.position)[0];
+  if (!lesson) return;
+  const blocks = data.contentBlocks.filter((block) => block.lessonId === lesson.id);
+  const maxPosition = blocks.reduce((max, block) => Math.max(max, block.position), 0);
+  if (!data.contentBlocks.some((block) => block.id === `${lesson.id}-nv-diagram`)) {
+    data.contentBlocks.push(stamp({
+      id: `${lesson.id}-nv-diagram`,
+      lessonId: lesson.id,
+      type: "learning_diagram",
+      title,
+      body,
+      data: { diagramId },
+      position: maxPosition + 1,
+      required: false,
+      stageType: "SEE"
+    }));
+  }
+  if (!data.contentBlocks.some((block) => block.id === `${lesson.id}-nv-artifact`)) {
+    data.contentBlocks.push(stamp({
+      id: `${lesson.id}-nv-artifact`,
+      lessonId: lesson.id,
+      type: "artifact_review",
+      title: title.replace("Investigation", "Artifact Review"),
+      body: "Inspect the artifact and distinguish confirmed concerns from items that need more context.",
+      data: { artifactId },
+      position: maxPosition + 2,
+      required: false,
+      stageType: "TRY"
+    }));
+  }
 }
 
 function addLearningExperience3Seed(data: AppData) {

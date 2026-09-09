@@ -1203,6 +1203,42 @@ export class WorkflowService {
     await this.persist();
   }
 
+  async saveLearningItem(input: { targetType: "COURSE" | "LESSON" | "BLOCK" | "SCENARIO" | "RESOURCE" | "PRACTICE"; targetId: string; title: string; href: string; note?: string }) {
+    const existing = this.data.savedLearningItems.find((item) => item.userId === this.actorId && item.targetType === input.targetType && item.targetId === input.targetId);
+    if (existing) {
+      existing.title = input.title;
+      existing.href = input.href;
+      existing.note = input.note ?? existing.note;
+      existing.updatedAt = now();
+    } else {
+      this.data.savedLearningItems.push({ id: id("saved"), userId: this.actorId, ...input, createdAt: now(), updatedAt: now() });
+    }
+    await this.recordExperienceEvent(input.targetType === "RESOURCE" ? "RESOURCE_OPENED" : "SECTION_VIEWED", input.targetId, { saved: true }, false);
+    await this.persist();
+  }
+
+  async createLearnerGoal(skillId: string) {
+    const existing = this.data.learnerGoals.find((goal) => goal.userId === this.actorId && goal.skillId === skillId && goal.status === "ACTIVE");
+    if (existing) return existing;
+    const goal = { id: id("goal"), userId: this.actorId, skillId, status: "ACTIVE" as const, createdAt: now(), updatedAt: now() };
+    this.data.learnerGoals.push(goal);
+    await this.persist();
+    return goal;
+  }
+
+  async updateLearnerGoal(goalId: string, status: "ACTIVE" | "COMPLETED" | "ARCHIVED") {
+    const goal = this.data.learnerGoals.find((item) => item.id === goalId && item.userId === this.actorId);
+    if (!goal) return;
+    goal.status = status;
+    goal.updatedAt = now();
+    await this.persist();
+  }
+
+  async recordExperienceEvent(eventType: "LESSON_STARTED" | "LESSON_EXITED" | "SECTION_VIEWED" | "HINT_USED" | "INTERACTION_RETRIED" | "SCENARIO_REPLAYED" | "RESOURCE_OPENED" | "SEARCH_PERFORMED" | "REFERENCE_MODE_OPENED", targetId?: string, metadata?: Record<string, string | number | boolean>, shouldPersist = true) {
+    this.data.learningExperienceEvents.push({ id: id("lx"), userId: this.actorId, eventType, targetId, metadata, createdAt: now(), updatedAt: now() });
+    if (shouldPersist) await this.persist();
+  }
+
   async completeLearningActivity(courseId: string, lessonId: string, activityId: string, answers: unknown, score = 100) {
     const course = this.requireCourse(courseId);
     const existing = this.data.scenarioAttempts.find((item) => item.userId === this.actorId && item.scenarioId === activityId);

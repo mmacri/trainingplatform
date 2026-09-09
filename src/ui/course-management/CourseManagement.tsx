@@ -37,6 +37,7 @@ import {
   canReviewCourse,
   hasAnyRole
 } from "../../services/appServices";
+import { InstructionalQualityService } from "../../services/instructionalQualityService";
 import { useApp } from "../appContext";
 
 const statusLabels: Record<CourseStatus, string> = {
@@ -1180,6 +1181,7 @@ function OverviewTab({ course, readiness }: { course: Course; readiness: ReturnT
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(course.title);
   const [description, setDescription] = useState(course.shortDescription);
+  const quality = InstructionalQualityService.analyzeCourse(data, course.id);
   const save = async () => {
     await service().updateCourse(course.id, { title, shortDescription: description });
     await refresh();
@@ -1223,6 +1225,30 @@ function OverviewTab({ course, readiness }: { course: Course; readiness: ReturnT
               <div><p className="font-medium">{check.label}</p><p className="text-xs text-muted-foreground">{check.message}</p></div>
             </div>
           ))}
+        </div>
+      </Panel>
+      <Panel className="xl:col-span-2">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h2 className="font-semibold">Learning Experience Quality</h2>
+            <p className="text-sm text-muted-foreground">Instructional checks for structure, visuals, learner actions, feedback, reinforcement, and reusable references.</p>
+          </div>
+          <span className={`rounded-md px-2 py-1 text-xs font-medium ${quality.findings.some((finding) => finding.severity === "BLOCKING") ? "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200" : quality.findings.some((finding) => finding.severity === "WARNING") ? "bg-amber-50 text-amber-700 dark:bg-amber-950 dark:text-amber-200" : "bg-emerald-50 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200"}`}>{quality.findings.some((finding) => finding.severity === "BLOCKING") ? "Blocking Issues" : quality.findings.some((finding) => finding.severity === "WARNING") ? "Needs Attention" : "Ready"}</span>
+        </div>
+        <div className="mt-4 grid gap-2 md:grid-cols-3 xl:grid-cols-7">
+          {[
+            ["Structure", quality.structure],
+            ["Visual Learning", quality.visualLearning],
+            ["Interactivity", quality.interactivity],
+            ["Applied Practice", quality.appliedPractice],
+            ["Feedback", quality.feedback],
+            ["Reinforcement", quality.reinforcement],
+            ["Reference Value", quality.referenceValue]
+          ].map(([label, state]) => <div key={label} className="rounded-md border border-border p-2 text-sm"><p className="font-medium">{label}</p><p className={state === "STRONG" ? "text-emerald-700" : "text-amber-700"}>{String(state).replaceAll("_", " ")}</p></div>)}
+        </div>
+        <div className="mt-4 space-y-2">
+          {quality.findings.slice(0, 6).map((finding) => <div key={finding.id} className="rounded-md border border-border p-3 text-sm"><div className="flex items-center gap-2"><AlertTriangle size={15} className={finding.severity === "BLOCKING" ? "text-red-600" : finding.severity === "WARNING" ? "text-amber-600" : "text-cyan-700"} /><span className="font-medium">{finding.category}</span><span className="text-xs text-muted-foreground">{finding.severity}</span></div><p className="mt-1 text-muted-foreground">{finding.message}</p><p className="mt-1 text-xs text-muted-foreground">Suggested: {finding.recommendation}</p></div>)}
+          {!quality.findings.length ? <p className="text-sm text-muted-foreground">No instructional quality findings.</p> : null}
         </div>
       </Panel>
     </div>

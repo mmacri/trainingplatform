@@ -129,6 +129,15 @@ export interface Course extends BaseRecord {
   lastContentReviewAt?: string;
   nextContentReviewAt?: string;
   contentReviewOwnerId?: string;
+  storyArc?: CourseStoryArc;
+}
+
+export interface CourseStoryArc {
+  worldId?: string;
+  recurringPersonIds: string[];
+  recurringSystemIds: string[];
+  recurringFacilityIds: string[];
+  recurringVendorIds: string[];
 }
 
 export interface CourseOwner extends BaseRecord {
@@ -181,6 +190,15 @@ export interface Lesson extends BaseRecord {
   position: number;
   required: boolean;
   estimatedMinutes: number;
+  instructionalStages?: LessonInstructionalStage[];
+  worldContextIds?: string[];
+}
+
+export interface LessonInstructionalStage {
+  id: string;
+  type: "HOOK" | "UNDERSTAND" | "SEE" | "TRY" | "DECIDE" | "APPLY" | "TAKEAWAY";
+  label: string;
+  blockIds: string[];
 }
 
 export interface ContentBlock extends BaseRecord {
@@ -195,6 +213,8 @@ export interface ContentBlock extends BaseRecord {
   mappedStandardReferenceIds?: string[];
   estimatedInteractionTime?: number;
   position: number;
+  stageType?: LessonInstructionalStage["type"];
+  visualExplanationId?: string;
 }
 
 export interface CourseResource extends BaseRecord {
@@ -828,6 +848,167 @@ export interface LearningResource extends BaseRecord {
   global: boolean;
 }
 
+export interface TrainingWorld extends BaseRecord {
+  name: string;
+  description: string;
+  people: TrainingPerson[];
+  systems: TrainingSystem[];
+  facilities: TrainingFacility[];
+  vendors: TrainingVendor[];
+  relationships: TrainingRelationship[];
+}
+
+export interface TrainingPerson {
+  id: string;
+  name: string;
+  title: string;
+  department?: string;
+  roleSummary: string;
+  currentRole?: string;
+  previousRole?: string;
+  trainingUseCases: string[];
+}
+
+export interface TrainingSystem {
+  id: string;
+  name: string;
+  systemType: string;
+  description: string;
+  owner?: string;
+  facilityId?: string;
+  attributes: Record<string, string>;
+  relatedCourseIds: string[];
+}
+
+export interface TrainingFacility {
+  id: string;
+  name: string;
+  description: string;
+  facilityType: string;
+  locationSummary: string;
+  relatedCourseIds: string[];
+}
+
+export interface TrainingVendor {
+  id: string;
+  name: string;
+  description: string;
+  services: string[];
+  relatedCourseIds: string[];
+}
+
+export interface TrainingRelationship {
+  id: string;
+  sourceId: string;
+  targetId: string;
+  label: string;
+}
+
+export type TrainingArtifactType =
+  | "ACCESS_REQUEST"
+  | "ACCESS_APPROVAL"
+  | "ACCOUNT_INVENTORY"
+  | "PATCH_EVALUATION"
+  | "VISITOR_LOG"
+  | "INCIDENT_TIMELINE"
+  | "INCIDENT_RECORD"
+  | "RECOVERY_PLAN"
+  | "RECOVERY_EXERCISE"
+  | "CONFIGURATION_BASELINE"
+  | "VULNERABILITY_RECORD"
+  | "INFORMATION_HANDLING_RECORD"
+  | "COMMUNICATION_PATH_RECORD"
+  | "VENDOR_SECURITY_REVIEW"
+  | "PHYSICAL_RISK_ASSESSMENT"
+  | "MONITORING_COVERAGE_MAP"
+  | "EVIDENCE_PACKAGE"
+  | "EXCEPTION_RECORD";
+
+export interface TrainingArtifact extends BaseRecord {
+  artifactType: TrainingArtifactType;
+  title: string;
+  subtitle?: string;
+  fields: TrainingArtifactField[];
+  status?: string;
+  relatedCourseIds: string[];
+  relatedSkillIds: string[];
+  issues?: ArtifactIssue[];
+  notes?: string[];
+}
+
+export interface TrainingArtifactField {
+  id: string;
+  label: string;
+  value: string;
+  category?: string;
+  inspectable?: boolean;
+  traceabilityRole?: string;
+}
+
+export interface ArtifactIssue {
+  id: string;
+  fieldId?: string;
+  severity: "INFO" | "REVIEW" | "CONCERN";
+  explanation: string;
+  learnerShouldIdentify: boolean;
+}
+
+export interface LearningDiagram extends BaseRecord {
+  type: "PROCESS_FLOW" | "LIFECYCLE" | "SYSTEM_ARCHITECTURE" | "NETWORK_TOPOLOGY" | "TIMELINE" | "DECISION_TREE" | "DEPENDENCY_MAP" | "RESPONSIBILITY_CHAIN" | "BEFORE_AFTER" | "RISK_MODEL";
+  title: string;
+  description?: string;
+  nodes: DiagramNode[];
+  edges: DiagramEdge[];
+  orientation?: "HORIZONTAL" | "VERTICAL" | "FREEFORM";
+  stepThroughEnabled?: boolean;
+  relatedCourseIds: string[];
+}
+
+export interface DiagramNode {
+  id: string;
+  label: string;
+  subtitle?: string;
+  description?: string;
+  icon?: string;
+  metadata?: Record<string, string>;
+}
+
+export interface DiagramEdge {
+  id: string;
+  sourceNodeId: string;
+  targetNodeId: string;
+  label?: string;
+}
+
+export interface ScenarioSeries extends BaseRecord {
+  title: string;
+  description: string;
+  scenarioIds: string[];
+  relatedSkillIds: string[];
+}
+
+export interface LearnerGoal extends BaseRecord {
+  userId: string;
+  skillId: string;
+  status: "ACTIVE" | "COMPLETED" | "ARCHIVED";
+}
+
+export interface SavedLearningItem extends BaseRecord {
+  userId: string;
+  targetType: "COURSE" | "LESSON" | "BLOCK" | "SCENARIO" | "RESOURCE" | "PRACTICE";
+  targetId: string;
+  title: string;
+  href: string;
+  note?: string;
+}
+
+export interface LearningExperienceEvent extends BaseRecord {
+  userId: string;
+  eventType: "LESSON_STARTED" | "LESSON_EXITED" | "SECTION_VIEWED" | "HINT_USED" | "INTERACTION_RETRIED" | "SCENARIO_REPLAYED" | "RESOURCE_OPENED" | "SEARCH_PERFORMED" | "REFERENCE_MODE_OPENED";
+  targetId?: string;
+  metadata?: Record<string, string | number | boolean>;
+}
+
 export interface LearningSessionPreference {
   defaultSupportMode: "GUIDED" | "STANDARD" | "CHALLENGE";
   textSize: "STANDARD" | "LARGE";
@@ -923,6 +1104,13 @@ export interface AppData {
   learningSessions: LearningSession[];
   learnerAchievements: LearnerAchievement[];
   learningResources: LearningResource[];
+  trainingWorlds: TrainingWorld[];
+  trainingArtifacts: TrainingArtifact[];
+  learningDiagrams: LearningDiagram[];
+  scenarioSeries: ScenarioSeries[];
+  learnerGoals: LearnerGoal[];
+  savedLearningItems: SavedLearningItem[];
+  learningExperienceEvents: LearningExperienceEvent[];
 }
 
 export const tableNames = [
@@ -998,7 +1186,14 @@ export const tableNames = [
   "learningPreferences",
   "learningSessions",
   "learnerAchievements",
-  "learningResources"
+  "learningResources",
+  "trainingWorlds",
+  "trainingArtifacts",
+  "learningDiagrams",
+  "scenarioSeries",
+  "learnerGoals",
+  "savedLearningItems",
+  "learningExperienceEvents"
 ] as const;
 
 export type TableName = (typeof tableNames)[number];
