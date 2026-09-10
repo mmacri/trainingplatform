@@ -109,6 +109,7 @@ export interface Course extends BaseRecord {
   requireAcknowledgement?: boolean;
   requireManagerValidation?: boolean;
   finalAssessmentEnabled?: boolean;
+  preAssessmentEnabled?: boolean;
   attemptsAllowed?: number;
   failedAttemptBehavior?: "RETRY_IMMEDIATELY" | "WAIT_24_HOURS" | "MANAGER_RESET_REQUIRED";
   randomizeQuestions?: boolean;
@@ -318,7 +319,7 @@ export interface LearningPathEnrollment extends BaseRecord {
 export interface Assignment extends BaseRecord {
   organizationId: string;
   title: string;
-  targetType: "COURSE" | "LEARNING_PATH" | "CERTIFICATION" | "PRACTICE" | "SCENARIO" | "CAMPAIGN";
+  targetType: "COURSE" | "LEARNING_PATH" | "CERTIFICATION" | "PRACTICE" | "SCENARIO" | "CAMPAIGN" | "BUNDLE";
   targetId: string;
   createdById: string;
   dueAt: string;
@@ -987,6 +988,133 @@ export interface ScenarioSeries extends BaseRecord {
   relatedSkillIds: string[];
 }
 
+export interface TrainingWorldEvent extends BaseRecord {
+  worldId: string;
+  title: string;
+  description: string;
+  occurredAt: string;
+  entityIds: string[];
+  relatedCourseIds: string[];
+  relatedScenarioIds: string[];
+  eventType: "PERSONNEL_CHANGE" | "ACCESS_CHANGE" | "SYSTEM_CHANGE" | "SECURITY_EVENT" | "RECOVERY_EVENT" | "VENDOR_EVENT" | "AUDIT_EVENT";
+}
+
+export interface CourseExperienceProfile extends BaseRecord {
+  courseId: string;
+  primaryLearningMode: "ANALYZE" | "GOVERN" | "DECIDE" | "INVESTIGATE" | "TRACE" | "RESTORE" | "COMPARE" | "HANDLE" | "ASSESS" | "MONITOR" | "PREPARE";
+  visualMotif: string;
+  primaryArtifactTypes: string[];
+  primaryInteractionTypes: string[];
+  signatureScenarioStyle: string;
+  recurringWorldEntityIds: string[];
+}
+
+export interface CourseMission extends BaseRecord {
+  courseId: string;
+  moduleId?: string;
+  title: string;
+  objective: string;
+  briefing?: string;
+  recurringEntityIds: string[];
+}
+
+export interface InvestigationDefinition extends BaseRecord {
+  title: string;
+  description: string;
+  availableTools: InvestigationToolConfig[];
+  objectives: InvestigationObjective[];
+  findings: InvestigationDefinitionFinding[];
+  conclusionPrompt?: string;
+  hypothesisEnabled: boolean;
+  evidenceCollectionEnabled: boolean;
+  notebookEnabled: boolean;
+  relatedCourseIds: string[];
+  relatedScenarioIds: string[];
+  skillIds: string[];
+}
+
+export interface InvestigationToolConfig {
+  id: string;
+  label: string;
+  toolType: "SYSTEM_CONSOLE" | "ACCESS_MANAGER" | "INCIDENT_CONSOLE" | "MAINTENANCE_SCHEDULE" | "NETWORK_VIEW" | "RECOVERY_CONSOLE" | "VENDOR_WORKSPACE" | "AUDIT_WORKSPACE" | "ARTIFACT_VIEWER";
+  records: Array<{ id: string; title: string; summary: string; relevantFindingIds?: string[]; evidenceValue?: "RELEVANT" | "UNNECESSARY" | "DISTRACTOR" }>;
+}
+
+export interface InvestigationObjective {
+  id: string;
+  label: string;
+  skillId?: string;
+  required: boolean;
+}
+
+export interface InvestigationDefinitionFinding {
+  id: string;
+  title: string;
+  description: string;
+  sourceToolId: string;
+  sourceRecordId: string;
+  skillId?: string;
+}
+
+export interface InvestigationNote extends BaseRecord {
+  attemptId: string;
+  userId: string;
+  noteType: "MANUAL" | "FINDING" | "EVIDENCE" | "HYPOTHESIS";
+  title: string;
+  content: string;
+  sourceToolId?: string;
+  sourceRecordId?: string;
+}
+
+export interface InvestigationHypothesis extends BaseRecord {
+  attemptId: string;
+  userId: string;
+  selectedAt: string;
+  hypothesis: "AUTHORIZED_ACTIVITY" | "MISCONFIGURATION" | "POTENTIAL_UNAUTHORIZED_ACTIVITY" | "INSUFFICIENT_INFORMATION";
+  confidence: "LOW" | "MEDIUM" | "HIGH";
+}
+
+export interface ActivityVariantDefinition extends BaseRecord {
+  activityId: string;
+  variables: Record<string, unknown>;
+}
+
+export interface LearningProgram extends BaseRecord {
+  title: string;
+  description: string;
+  status: "DRAFT" | "PUBLISHED" | "ARCHIVED";
+  audience?: string[];
+  stages: LearningProgramStage[];
+  capstoneScenarioId?: string;
+  certificateEnabled: boolean;
+}
+
+export interface LearningProgramStage {
+  id: string;
+  title: string;
+  description?: string;
+  items: LearningProgramItem[];
+}
+
+export interface LearningProgramItem {
+  id: string;
+  type: "COURSE" | "PRACTICE" | "SCENARIO" | "CAPSTONE";
+  targetId: string;
+  required: boolean;
+}
+
+export interface LearningAssignmentBundle extends BaseRecord {
+  title: string;
+  description?: string;
+  itemIds: Array<{ type: "COURSE" | "PRACTICE" | "SCENARIO"; targetId: string; required: boolean }>;
+}
+
+export interface SkillCoachingGuide extends BaseRecord {
+  skillId: string;
+  prompts: string[];
+  suggestedPracticeIds: string[];
+}
+
 export interface LearnerGoal extends BaseRecord {
   userId: string;
   skillId: string;
@@ -1108,6 +1236,16 @@ export interface AppData {
   trainingArtifacts: TrainingArtifact[];
   learningDiagrams: LearningDiagram[];
   scenarioSeries: ScenarioSeries[];
+  trainingWorldEvents: TrainingWorldEvent[];
+  courseExperienceProfiles: CourseExperienceProfile[];
+  courseMissions: CourseMission[];
+  investigationDefinitions: InvestigationDefinition[];
+  investigationNotes: InvestigationNote[];
+  investigationHypotheses: InvestigationHypothesis[];
+  activityVariants: ActivityVariantDefinition[];
+  learningPrograms: LearningProgram[];
+  learningAssignmentBundles: LearningAssignmentBundle[];
+  skillCoachingGuides: SkillCoachingGuide[];
   learnerGoals: LearnerGoal[];
   savedLearningItems: SavedLearningItem[];
   learningExperienceEvents: LearningExperienceEvent[];
@@ -1191,6 +1329,16 @@ export const tableNames = [
   "trainingArtifacts",
   "learningDiagrams",
   "scenarioSeries",
+  "trainingWorldEvents",
+  "courseExperienceProfiles",
+  "courseMissions",
+  "investigationDefinitions",
+  "investigationNotes",
+  "investigationHypotheses",
+  "activityVariants",
+  "learningPrograms",
+  "learningAssignmentBundles",
+  "skillCoachingGuides",
   "learnerGoals",
   "savedLearningItems",
   "learningExperienceEvents"

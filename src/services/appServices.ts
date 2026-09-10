@@ -1429,6 +1429,46 @@ export class WorkflowService {
     return attempt;
   }
 
+  async addInvestigationNote(input: { attemptId: string; noteType: "MANUAL" | "FINDING" | "EVIDENCE" | "HYPOTHESIS"; title: string; content: string; sourceToolId?: string; sourceRecordId?: string }) {
+    const existing = this.data.investigationNotes.find((note) => note.userId === this.actorId && note.attemptId === input.attemptId && note.noteType === input.noteType && note.sourceToolId === input.sourceToolId && note.sourceRecordId === input.sourceRecordId);
+    if (existing && input.noteType !== "MANUAL") {
+      existing.title = input.title;
+      existing.content = input.content;
+      existing.updatedAt = now();
+      await this.persist();
+      return existing;
+    }
+    const note = { id: id("invnote"), userId: this.actorId, ...input, createdAt: now(), updatedAt: now() };
+    this.data.investigationNotes.push(note);
+    audit(this.data, this.actorId, `INVESTIGATION_${input.noteType}_ADDED`, "Investigation", input.attemptId, `Added ${input.noteType.toLowerCase().replaceAll("_", " ")}: ${input.title}.`);
+    await this.persist();
+    return note;
+  }
+
+  async setInvestigationHypothesis(input: { attemptId: string; hypothesis: "AUTHORIZED_ACTIVITY" | "MISCONFIGURATION" | "POTENTIAL_UNAUTHORIZED_ACTIVITY" | "INSUFFICIENT_INFORMATION"; confidence: "LOW" | "MEDIUM" | "HIGH" }) {
+    const record = { id: id("hypothesis"), userId: this.actorId, selectedAt: now(), ...input, createdAt: now(), updatedAt: now() };
+    this.data.investigationHypotheses.push(record);
+    this.data.investigationNotes.push({ id: id("invnote"), userId: this.actorId, attemptId: input.attemptId, noteType: "HYPOTHESIS", title: "Working hypothesis", content: `${input.hypothesis.replaceAll("_", " ")} (${input.confidence.toLowerCase()} confidence)`, createdAt: now(), updatedAt: now() });
+    audit(this.data, this.actorId, "INVESTIGATION_HYPOTHESIS_SET", "Investigation", input.attemptId, `Set working hypothesis to ${input.hypothesis}.`);
+    await this.persist();
+    return record;
+  }
+
+  async completeInvestigation(investigationId: string, attemptId: string) {
+    const investigation = this.data.investigationDefinitions.find((item) => item.id === investigationId);
+    if (!investigation) throw new Error("Investigation not found.");
+    const notes = this.data.investigationNotes.filter((note) => note.userId === this.actorId && note.attemptId === attemptId);
+    const found = new Set(notes.filter((note) => note.noteType === "FINDING").map((note) => note.sourceRecordId));
+    const ratio = investigation.findings.length ? investigation.findings.filter((finding) => found.has(finding.sourceRecordId)).length / investigation.findings.length : 0;
+    const result: "NEEDS_REVIEW" | "DEVELOPING" | "STRONG" = ratio >= 0.8 ? "STRONG" : ratio >= 0.45 ? "DEVELOPING" : "NEEDS_REVIEW";
+    investigation.skillIds.forEach((skillId) => {
+      this.data.skillEvidence.push({ id: id("skillevidence"), userId: this.actorId, skillId, sourceType: "SCENARIO", sourceId: attemptId, observedAt: now(), result, weight: 3, details: investigation.title, createdAt: now(), updatedAt: now() });
+    });
+    audit(this.data, this.actorId, "INVESTIGATION_COMPLETED", "Investigation", investigation.id, `Completed ${investigation.title} with ${result.toLowerCase().replaceAll("_", " ")} result.`);
+    await this.persist();
+    return result;
+  }
+
   async setScenarioSimulationTab(attemptId: string, activeTab: string, selectedRecordId?: string) {
     const attempt = this.data.branchingScenarioAttempts.find((item) => item.id === attemptId);
     if (!attempt) throw new Error("Scenario attempt not found.");
@@ -1530,6 +1570,18 @@ export class WorkflowService {
     audiences.forEach((audience) => this.data.assignmentAudiences.push({ id: id("aud"), assignmentId: assignment.id, ...audience, createdAt: now(), updatedAt: now() }));
     this.resolveAudienceLearners(audiences).forEach((userId) => notify(this.data, userId, `${targetType}_ASSIGNED`, `${targetType === "PRACTICE" ? "Practice" : "Scenario"} assigned`, message || `${target.title} was assigned to you.`, targetType === "PRACTICE" ? `/practice/${targetId}` : `/scenarios/${targetId}`));
     audit(this.data, this.actorId, `${targetType}_ASSIGNED`, targetType, targetId, `Assigned ${target.title}.`);
+    await this.persist();
+    return assignment;
+  }
+
+  async assignLearningBundle(bundleId: string, audiences: Array<Pick<AssignmentAudience, "audienceType" | "audienceId">>, dueAt: string, message?: string) {
+    const bundle = this.data.learningAssignmentBundles.find((item) => item.id === bundleId);
+    if (!bundle) throw new Error("Assignment bundle not found.");
+    const assignment: Assignment = { id: id("assign"), organizationId: this.data.organizations[0].id, title: bundle.title, targetType: "BUNDLE", targetId: bundle.id, createdById: this.actorId, dueAt, assignedAt: now(), recurrence: "NONE", status: "ACTIVE", notificationSettings: { notifyLearners: true }, createdAt: now(), updatedAt: now() };
+    this.data.assignments.push(assignment);
+    audiences.forEach((audience) => this.data.assignmentAudiences.push({ id: id("aud"), assignmentId: assignment.id, ...audience, createdAt: now(), updatedAt: now() }));
+    this.resolveAudienceLearners(audiences).forEach((userId) => notify(this.data, userId, "BUNDLE_ASSIGNED", "Learning bundle assigned", message || `${bundle.title} was assigned to you.`, "/learn-home"));
+    audit(this.data, this.actorId, "BUNDLE_ASSIGNED", "LearningAssignmentBundle", bundle.id, `Assigned ${bundle.title}.`);
     await this.persist();
     return assignment;
   }

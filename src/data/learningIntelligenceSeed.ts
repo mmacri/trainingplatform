@@ -1,5 +1,19 @@
 import { addDays, subDays } from "date-fns";
-import type { AppData, LearningResource, PracticeActivity, ScenarioDefinition, Skill } from "./schema";
+import type {
+  ActivityVariantDefinition,
+  AppData,
+  CourseExperienceProfile,
+  CourseMission,
+  InvestigationDefinition,
+  LearningAssignmentBundle,
+  LearningProgram,
+  LearningResource,
+  PracticeActivity,
+  ScenarioDefinition,
+  Skill,
+  SkillCoachingGuide,
+  TrainingWorldEvent
+} from "./schema";
 import { northValleyArtifacts, northValleyDiagrams, northValleyScenarioSeries, northValleyWorld } from "./training-world/northValleyEnergy";
 
 const demoNow = new Date("2026-09-09T16:00:00.000Z");
@@ -196,19 +210,401 @@ export function addLearningIntelligenceSeed(data: AppData) {
 
   addLearningExperience3Seed(data);
   addLearningExperience4Seed(data);
+  addLearningExperience5Seed(data);
 
   if (!data.applicationSettings.some((setting) => setting.key === "learningIntelligenceVersion")) {
     data.applicationSettings.push(stamp({ id: "setting_learning_intelligence_version", key: "learningIntelligenceVersion", value: 1 }));
   }
   const experienceSetting = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion");
   if (experienceSetting) {
-    experienceSetting.value = 4;
+    experienceSetting.value = 5;
     experienceSetting.updatedAt = iso(demoNow);
   } else {
-    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 4 }));
+    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 5 }));
   }
 
   return data;
+}
+
+function addLearningExperience5Seed(data: AppData) {
+  northValleyStoryEvents().forEach((event) => upsertById(data.trainingWorldEvents, stamp(event)));
+  courseExperienceProfiles().forEach((profile) => upsertById(data.courseExperienceProfiles, stamp(profile)));
+  courseMissionSeeds(data).forEach((mission) => upsertById(data.courseMissions, stamp(mission)));
+  investigationSeeds().forEach((investigation) => upsertById(data.investigationDefinitions, stamp(investigation)));
+  activityVariantSeeds().forEach((variant) => upsertById(data.activityVariants, stamp(variant)));
+  learningProgramSeeds().forEach((program) => upsertById(data.learningPrograms, stamp(program)));
+  assignmentBundleSeeds().forEach((bundle) => upsertById(data.learningAssignmentBundles, stamp(bundle)));
+  coachingGuideSeeds().forEach((guide) => upsertById(data.skillCoachingGuides, stamp(guide)));
+
+  buildCapstoneScenarios().forEach((scenario) => upsertById(data.scenarioDefinitions, stamp(scenario)));
+  attachCoursePreAssessments(data);
+}
+
+function northValleyStoryEvents(): Array<Omit<TrainingWorldEvent, "createdAt" | "updatedAt">> {
+  const at = (day: number) => iso(subDays(demoNow, 24 - day));
+  return [
+    {
+      id: "world-event-jordan-role-change",
+      worldId: "world-north-valley-energy",
+      title: "Jordan Changes Roles",
+      description: "Jordan Lee transfers from Control Center Operations to Business Planning.",
+      occurredAt: at(1),
+      entityIds: ["person-jordan-lee", "person-morgan-chen", "facility-nv-control-center"],
+      relatedCourseIds: ["course-cip004-annual-refresher", "course-cip004-foundations"],
+      relatedScenarioIds: ["scenario-jordan-role-change-lab"],
+      eventType: "PERSONNEL_CHANGE"
+    },
+    {
+      id: "world-event-old-access-persists",
+      worldId: "world-north-valley-energy",
+      title: "Old Access Persists",
+      description: "Jordan retains access that no longer clearly aligns with current responsibilities.",
+      occurredAt: at(2),
+      entityIds: ["person-jordan-lee", "system-ops-srv-12"],
+      relatedCourseIds: ["course-cip004-annual-refresher", "course-cip005-esp-access"],
+      relatedScenarioIds: ["scenario-jordan-role-change-lab"],
+      eventType: "ACCESS_CHANGE"
+    },
+    {
+      id: "world-event-vendor-temporary-access",
+      worldId: "world-north-valley-energy",
+      title: "Vendor Temporary Access Remains Active",
+      description: "GridTech temporary access remains available after the expected support window.",
+      occurredAt: at(3),
+      entityIds: ["vendor-gridtech-services", "system-ops-srv-12"],
+      relatedCourseIds: ["course-cip005-esp-access", "course-cip013-supply-chain"],
+      relatedScenarioIds: ["scenario-emergency-vendor-access", "scenario-vendor-permanent-admin"],
+      eventType: "VENDOR_EVENT"
+    },
+    {
+      id: "world-event-ops-srv-12-drift",
+      worldId: "world-north-valley-energy",
+      title: "OPS-SRV-12 Shows Security Drift",
+      description: "Legacy FTP, temporary RDP, a patch constraint, and expired temporary admin access converge on OPS-SRV-12.",
+      occurredAt: at(4),
+      entityIds: ["system-ops-srv-12", "person-jamie-rivera"],
+      relatedCourseIds: ["course-cip007-system-security", "course-cip010-change-vulnerability"],
+      relatedScenarioIds: ["scenario-ops-srv-12-review", "scenario-capstone-cyber-ops-night-shift"],
+      eventType: "SYSTEM_CHANGE"
+    },
+    {
+      id: "world-event-unexpected-admin-activity",
+      worldId: "world-north-valley-energy",
+      title: "Unexpected Administrative Activity",
+      description: "ENG-WS-22 communicates unexpectedly with OPS-SRV-04 during the night shift.",
+      occurredAt: at(5),
+      entityIds: ["system-eng-ws-22", "system-ops-srv-04"],
+      relatedCourseIds: ["course-cip008-incident-response", "course-cip015-insm"],
+      relatedScenarioIds: ["scenario-unexpected-admin-connection", "scenario-capstone-cyber-ops-night-shift"],
+      eventType: "SECURITY_EVENT"
+    },
+    {
+      id: "world-event-configuration-difference",
+      worldId: "world-north-valley-energy",
+      title: "Configuration Difference Found",
+      description: "A system state differs from the approved baseline and needs controlled review.",
+      occurredAt: at(6),
+      entityIds: ["system-ops-srv-12", "system-historian-02"],
+      relatedCourseIds: ["course-cip010-change-vulnerability"],
+      relatedScenarioIds: ["scenario-unauthorized-configuration-difference"],
+      eventType: "SYSTEM_CHANGE"
+    },
+    {
+      id: "world-event-recovery-dependency",
+      worldId: "world-north-valley-energy",
+      title: "Recovery Dependency Becomes Relevant",
+      description: "Recovery planning exposes an undocumented dependency for EMS-APP-04 and HISTORIAN-02.",
+      occurredAt: at(7),
+      entityIds: ["system-ems-app-04", "system-historian-02"],
+      relatedCourseIds: ["course-cip009-recovery-planning"],
+      relatedScenarioIds: ["scenario-recovery-procedure-failure"],
+      eventType: "RECOVERY_EVENT"
+    },
+    {
+      id: "world-event-audit-evidence-request",
+      worldId: "world-north-valley-energy",
+      title: "Audit Requests Supporting Evidence",
+      description: "The case history becomes evidence that must be reconstructed through records, samples, exceptions, and reviewer questions.",
+      occurredAt: at(8),
+      entityIds: ["person-casey-nguyen", "facility-corporate-admin"],
+      relatedCourseIds: ["course-audit-preparation", "course-cip003-security-management"],
+      relatedScenarioIds: ["scenario-audit-evidence-package", "scenario-capstone-audit-readiness"],
+      eventType: "AUDIT_EVENT"
+    }
+  ];
+}
+
+function profile(id: string, mode: CourseExperienceProfile["primaryLearningMode"], motif: string, artifacts: string[], interactions: string[], scenario: string, entities: string[]): Omit<CourseExperienceProfile, "createdAt" | "updatedAt"> {
+  return { id: `profile-${id.replace(/^course-/, "")}`, courseId: id, primaryLearningMode: mode, visualMotif: motif, primaryArtifactTypes: artifacts, primaryInteractionTypes: interactions, signatureScenarioStyle: scenario, recurringWorldEntityIds: entities };
+}
+
+function courseExperienceProfiles(): Array<Omit<CourseExperienceProfile, "createdAt" | "updatedAt">> {
+  return [
+    profile("course-cip002-categorization", "ANALYZE", "asset/system relationship map", ["CATEGORIZATION_RECORD"], ["categorization matrix", "scope map", "change-trigger investigation"], "decision reconstruction", ["system-ems-app-04"]),
+    profile("course-cip003-security-management", "GOVERN", "ownership chain", ["EXCEPTION_RECORD", "EVIDENCE_PACKAGE"], ["responsibility chain", "control lifecycle", "exception review"], "governance casework", ["person-riley-patel", "person-casey-nguyen"]),
+    profile("course-cip004-foundations", "DECIDE", "person lifecycle", ["ACCESS_REQUEST", "ACCESS_APPROVAL"], ["personnel lifecycle", "access impact review"], "role-change decision", ["person-jordan-lee"]),
+    profile("course-cip004-supervisor-workshop", "DECIDE", "manager decision flow", ["ACCESS_APPROVAL", "ACCOUNT_INVENTORY"], ["approval quality", "trigger recognition", "casework"], "manager/access-owner workshop", ["person-morgan-chen", "person-jordan-lee"]),
+    profile("course-cip004-annual-refresher", "DECIDE", "person/access lifecycle", ["ACCESS_APPROVAL", "EVIDENCE_PACKAGE"], ["role-change scenario", "evidence inspection"], "Jordan role-change investigation", ["person-jordan-lee", "person-taylor-morgan"]),
+    profile("course-annual-awareness", "DECIDE", "human-security decision map", ["INCIDENT_RECORD"], ["rapid decisions", "phishing/MFA inspection"], "short human decision drills", ["person-taylor-morgan"]),
+    profile("course-cip005-esp-access", "TRACE", "network access path", ["ACCESS_REQUEST", "ACCESS_APPROVAL"], ["network path", "remote access review", "vendor session"], "access trace investigation", ["vendor-vector-systems", "vendor-gridtech-services"]),
+    profile("course-cip006-physical-security", "INVESTIGATE", "facility floor/access zones", ["VISITOR_LOG"], ["facility map", "visitor entry", "badge decision"], "physical access inspection", ["facility-nv-control-center", "facility-cedar-substation"]),
+    profile("course-cip007-system-security", "INVESTIGATE", "system console", ["ACCOUNT_INVENTORY", "PATCH_EVALUATION", "VULNERABILITY_RECORD"], ["system console", "service inspection", "account review", "patch sequence"], "OPS-SRV-12 investigation", ["system-ops-srv-12", "person-jamie-rivera"]),
+    profile("course-cip008-incident-response", "INVESTIGATE", "incident console/timeline", ["INCIDENT_TIMELINE", "INCIDENT_RECORD"], ["timeline", "facts-vs-assumptions", "evidence preservation"], "night-shift incident", ["system-eng-ws-22", "system-ops-srv-04"]),
+    profile("course-cip009-recovery-planning", "RESTORE", "service dependency map", ["RECOVERY_PLAN", "RECOVERY_EXERCISE"], ["dependency graph", "recovery sequence", "stale procedure"], "recovery gap case", ["system-ems-app-04", "system-historian-02"]),
+    profile("course-cip010-change-vulnerability", "COMPARE", "configuration comparison", ["CONFIGURATION_BASELINE", "VULNERABILITY_RECORD"], ["baseline/current comparison", "drift review"], "configuration drift investigation", ["system-ops-srv-12", "system-historian-02"]),
+    profile("course-cip011-information-protection", "HANDLE", "information lifecycle", ["INFORMATION_HANDLING_RECORD"], ["classification", "sharing decision", "wrong-recipient case"], "information handling case", ["person-casey-nguyen"]),
+    profile("course-cip012-control-center-communications", "TRACE", "communications path", ["COMMUNICATION_PATH_RECORD"], ["path review", "ownership matching", "change impact"], "communication path change", ["facility-nv-control-center", "facility-river-operations"]),
+    profile("course-cip013-supply-chain", "ASSESS", "supplier lifecycle", ["VENDOR_SECURITY_REVIEW", "ACCESS_REQUEST"], ["supplier profile", "contract/security review", "vendor access"], "supplier risk review", ["vendor-vector-systems", "vendor-gridtech-services"]),
+    profile("course-cip014-physical-risk", "ASSESS", "facility risk map", ["PHYSICAL_RISK_ASSESSMENT"], ["risk model", "mitigation review"], "facility risk case", ["facility-cedar-substation"]),
+    profile("course-cip015-insm", "MONITOR", "monitoring topology", ["MONITORING_COVERAGE_MAP", "INCIDENT_TIMELINE"], ["network topology", "coverage map", "alert context"], "monitoring blind spot investigation", ["system-eng-ws-22", "system-ops-srv-04"]),
+    profile("course-audit-preparation", "PREPARE", "audit workspace", ["EVIDENCE_PACKAGE", "EXCEPTION_RECORD"], ["evidence package", "population/sample review", "readiness summary"], "audit evidence defense", ["person-casey-nguyen"])
+  ];
+}
+
+function courseMissionSeeds(data: AppData): Array<Omit<CourseMission, "createdAt" | "updatedAt">> {
+  const moduleIds = (courseId: string) => data.modules.filter((module) => data.courses.find((course) => course.id === courseId)?.currentVersionId === module.courseVersionId).sort((a, b) => a.position - b.position).map((module) => module.id);
+  const mission = (id: string, courseId: string, moduleId: string | undefined, title: string, objective: string, entities: string[], briefing?: string): Omit<CourseMission, "createdAt" | "updatedAt"> => ({ id, courseId, moduleId, title, objective, briefing, recurringEntityIds: entities });
+  const cip007 = moduleIds("course-cip007-system-security");
+  const cip008 = moduleIds("course-cip008-incident-response");
+  const cip015 = moduleIds("course-cip015-insm");
+  return [
+    mission("mission-cip007-inspect-system", "course-cip007-system-security", cip007[0], "Mission 1 - Inspect the System", "Inspect OPS-SRV-12 services and identify what deserves review.", ["system-ops-srv-12"], "Start from observed configuration, not assumptions."),
+    mission("mission-cip007-evaluate-patch", "course-cip007-system-security", cip007[1], "Mission 2 - Evaluate the Patch", "Separate patch applicability from implementation timing and evidence.", ["system-ops-srv-12", "person-jamie-rivera"]),
+    mission("mission-cip007-review-access", "course-cip007-system-security", cip007[2], "Mission 3 - Review Access", "Review temporary, service, and privileged accounts for ownership and need.", ["system-ops-srv-12"]),
+    mission("mission-cip007-capstone", "course-cip007-system-security", cip007[3], "Capstone - Secure OPS-SRV-12", "Combine services, patches, accounts, vulnerabilities, and evidence.", ["system-ops-srv-12"]),
+    mission("mission-cip008-triage", "course-cip008-incident-response", cip008[0], "Mission 1 - Triage the Event", "Identify known facts and avoid premature conclusions.", ["system-eng-ws-22", "system-ops-srv-04"]),
+    mission("mission-cip008-timeline", "course-cip008-incident-response", cip008[1], "Mission 2 - Build the Timeline", "Preserve events and distinguish facts from assumptions.", ["system-eng-ws-22", "system-ops-srv-04"]),
+    mission("mission-cip015-map-monitoring", "course-cip015-insm", cip015[0], "Mission 1 - Map Monitoring", "Identify monitored, unmonitored, and changed internal paths.", ["system-eng-ws-22", "system-ops-srv-04", "system-historian-02"]),
+    mission("mission-cip015-capstone", "course-cip015-insm", cip015[1], "Capstone - Unexpected Internal Admin Connection", "Use monitoring context to verify, escalate, and document a defensible conclusion.", ["system-eng-ws-22", "system-ops-srv-04"])
+  ];
+}
+
+function investigationSeeds(): Array<Omit<InvestigationDefinition, "createdAt" | "updatedAt">> {
+  return [
+    {
+      id: "investigation-nv-night-shift",
+      title: "North Valley Night Shift Investigation",
+      description: "Investigate unexpected administrative activity by combining incident, system, access, network, and maintenance context.",
+      availableTools: [
+        { id: "tool-incident", label: "Incident Console", toolType: "INCIDENT_CONSOLE", records: [{ id: "event-0212-rdp", title: "02:12 Unexpected RDP", summary: "ENG-WS-22 to OPS-SRV-04 using administrative protocol.", relevantFindingIds: ["finding-unexpected-admin"], evidenceValue: "RELEVANT" }, { id: "event-0214-auth", title: "02:14 Authentication Pattern", summary: "Administrative account used outside normal pattern.", relevantFindingIds: ["finding-auth-context"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-access", label: "Access Manager", toolType: "ACCESS_MANAGER", records: [{ id: "access-vendor-temp", title: "vendor-temp", summary: "Temporary access expired yesterday but remains active.", relevantFindingIds: ["finding-expired-account"], evidenceValue: "RELEVANT" }, { id: "access-jrivera-admin", title: "jrivera-admin", summary: "Privileged account with current approval.", evidenceValue: "UNNECESSARY" }] },
+        { id: "tool-system", label: "System Console", toolType: "SYSTEM_CONSOLE", records: [{ id: "system-ops-srv-04", title: "OPS-SRV-04", summary: "Operations server receiving administrative connection.", evidenceValue: "RELEVANT" }, { id: "system-ops-srv-12", title: "OPS-SRV-12", summary: "Legacy FTP and temporary RDP enabled.", relevantFindingIds: ["finding-system-drift"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-maintenance", label: "Maintenance Schedule", toolType: "MAINTENANCE_SCHEDULE", records: [{ id: "maint-none", title: "No scheduled work", summary: "No approved maintenance window is visible for 02:12.", relevantFindingIds: ["finding-no-maintenance"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-network", label: "Network View", toolType: "NETWORK_VIEW", records: [{ id: "network-blind-spot", title: "Monitoring gap", summary: "Engineering-to-operations path has partial sensor visibility.", relevantFindingIds: ["finding-monitoring-gap"], evidenceValue: "RELEVANT" }] }
+      ],
+      objectives: [
+        { id: "night-known-facts", label: "Determine known facts", skillId: "skill-incident-recognition", required: true },
+        { id: "night-verify", label: "Verify authorization", skillId: "skill-incident-response", required: true },
+        { id: "night-preserve", label: "Preserve useful evidence", skillId: "skill-evidence-quality", required: true }
+      ],
+      findings: [
+        { id: "finding-unexpected-admin", title: "Unexpected administrative connection", description: "The connection is unusual and needs verification.", sourceToolId: "tool-incident", sourceRecordId: "event-0212-rdp", skillId: "skill-incident-recognition" },
+        { id: "finding-expired-account", title: "Expired temporary account", description: "Temporary access remains active beyond its expected duration.", sourceToolId: "tool-access", sourceRecordId: "access-vendor-temp", skillId: "skill-account-management" },
+        { id: "finding-system-drift", title: "System security drift", description: "Legacy and temporary services need controlled review.", sourceToolId: "tool-system", sourceRecordId: "system-ops-srv-12", skillId: "skill-system-hardening" },
+        { id: "finding-no-maintenance", title: "No visible maintenance", description: "No approved maintenance context is visible for the activity.", sourceToolId: "tool-maintenance", sourceRecordId: "maint-none", skillId: "skill-incident-response" },
+        { id: "finding-monitoring-gap", title: "Monitoring blind spot", description: "Visibility is partial on a path relevant to the investigation.", sourceToolId: "tool-network", sourceRecordId: "network-blind-spot", skillId: "skill-network-monitoring" }
+      ],
+      conclusionPrompt: "Document the known facts, open verification items, and escalation path.",
+      hypothesisEnabled: true,
+      evidenceCollectionEnabled: true,
+      notebookEnabled: true,
+      relatedCourseIds: ["course-cip007-system-security", "course-cip008-incident-response", "course-cip010-change-vulnerability", "course-cip015-insm"],
+      relatedScenarioIds: ["scenario-capstone-cyber-ops-night-shift"],
+      skillIds: ["skill-incident-recognition", "skill-account-management", "skill-system-hardening", "skill-patch-management", "skill-network-monitoring", "skill-evidence-quality"]
+    },
+    {
+      id: "investigation-audit-evidence-package",
+      title: "Audit Evidence Package Review",
+      description: "Review a North Valley evidence package and identify defects without rewriting historical records.",
+      availableTools: [
+        { id: "tool-procedure", label: "Procedure", toolType: "AUDIT_WORKSPACE", records: [{ id: "procedure-v31", title: "Procedure v3.1 referenced", summary: "Current process package expects v3.2.", relevantFindingIds: ["finding-wrong-procedure"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-population", label: "Population", toolType: "AUDIT_WORKSPACE", records: [{ id: "population-42-39", title: "Population mismatch", summary: "System report says 42 users; package contains 39.", relevantFindingIds: ["finding-population-mismatch"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-samples", label: "Samples", toolType: "AUDIT_WORKSPACE", records: [{ id: "sample-c", title: "Sample C", summary: "Missing approval evidence.", relevantFindingIds: ["finding-missing-approval"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-exception", label: "Exceptions", toolType: "AUDIT_WORKSPACE", records: [{ id: "exception-ex27", title: "EX-27", summary: "Exception expiration is stale.", relevantFindingIds: ["finding-stale-exception"], evidenceValue: "RELEVANT" }] }
+      ],
+      objectives: [
+        { id: "audit-gaps", label: "Identify package defects", skillId: "skill-audit-readiness", required: true },
+        { id: "audit-integrity", label: "Preserve factual integrity", skillId: "skill-evidence-quality", required: true }
+      ],
+      findings: [
+        { id: "finding-wrong-procedure", title: "Wrong procedure version", description: "The package references an older procedure version.", sourceToolId: "tool-procedure", sourceRecordId: "procedure-v31", skillId: "skill-audit-readiness" },
+        { id: "finding-population-mismatch", title: "Population discrepancy", description: "Population count and evidence package count do not reconcile.", sourceToolId: "tool-population", sourceRecordId: "population-42-39", skillId: "skill-evidence-quality" },
+        { id: "finding-missing-approval", title: "Missing sample approval", description: "Sample C does not show who approved the activity.", sourceToolId: "tool-samples", sourceRecordId: "sample-c", skillId: "skill-evidence-quality" },
+        { id: "finding-stale-exception", title: "Expired exception", description: "The exception record is past its review/expiration date.", sourceToolId: "tool-exception", sourceRecordId: "exception-ex27", skillId: "skill-control-ownership" }
+      ],
+      conclusionPrompt: "Create a readiness summary with known gaps, owners, and actions.",
+      hypothesisEnabled: false,
+      evidenceCollectionEnabled: true,
+      notebookEnabled: true,
+      relatedCourseIds: ["course-audit-preparation", "course-cip003-security-management"],
+      relatedScenarioIds: ["scenario-capstone-audit-readiness"],
+      skillIds: ["skill-audit-readiness", "skill-evidence-quality", "skill-control-ownership"]
+    },
+    {
+      id: "investigation-personnel-access-workshop",
+      title: "Personnel & Access Decision Workshop",
+      description: "Work through personnel events and decide which training, access, approval, and records are needed.",
+      availableTools: [
+        { id: "tool-person", label: "Personnel", toolType: "ACCESS_MANAGER", records: [{ id: "jordan-transfer", title: "Jordan Lee transfer", summary: "Previous Control Center Operations, current Business Planning.", relevantFindingIds: ["finding-role-change"], evidenceValue: "RELEVANT" }, { id: "contract-end", title: "Contract end", summary: "GridTech project support ends Friday.", relevantFindingIds: ["finding-contract-end"], evidenceValue: "RELEVANT" }] },
+        { id: "tool-access-review", label: "Access Review", toolType: "ACCESS_MANAGER", records: [{ id: "ops-access", title: "Operational access active", summary: "Remote administration and restricted workspace remain active.", relevantFindingIds: ["finding-old-access"], evidenceValue: "RELEVANT" }] }
+      ],
+      objectives: [
+        { id: "personnel-trigger", label: "Recognize personnel triggers", skillId: "skill-personnel-security", required: true },
+        { id: "access-impact", label: "Determine access impact", skillId: "skill-access-management", required: true }
+      ],
+      findings: [
+        { id: "finding-role-change", title: "Role change trigger", description: "A role change should trigger review of responsibilities and access.", sourceToolId: "tool-person", sourceRecordId: "jordan-transfer", skillId: "skill-personnel-security" },
+        { id: "finding-contract-end", title: "Contract end trigger", description: "Contract end may require access, facility, and evidence follow-through.", sourceToolId: "tool-person", sourceRecordId: "contract-end", skillId: "skill-access-management" },
+        { id: "finding-old-access", title: "Old operational access", description: "Operational access remains active after current responsibility changed.", sourceToolId: "tool-access-review", sourceRecordId: "ops-access", skillId: "skill-access-management" }
+      ],
+      conclusionPrompt: "Summarize the personnel triggers and required access review actions.",
+      hypothesisEnabled: false,
+      evidenceCollectionEnabled: true,
+      notebookEnabled: true,
+      relatedCourseIds: ["course-cip004-foundations", "course-cip004-annual-refresher", "course-cip005-esp-access", "course-cip006-physical-security"],
+      relatedScenarioIds: ["scenario-capstone-personnel-access"],
+      skillIds: ["skill-personnel-security", "skill-access-management", "skill-physical-access"]
+    }
+  ];
+}
+
+function activityVariantSeeds(): Array<Omit<ActivityVariantDefinition, "createdAt" | "updatedAt">> {
+  return [
+    { id: "variant-patch-a", activityId: "practice-patch-constraint", variables: { system: "OPS-SRV-12", patch: "PATCH-2026-042", severity: "High", constraint: "quarter-end freeze", mitigation: "under review" } },
+    { id: "variant-patch-b", activityId: "practice-patch-constraint", variables: { system: "EMS-APP-04", patch: "PATCH-2026-118", severity: "Medium", constraint: "vendor validation required", mitigation: "compensating monitoring" } },
+    { id: "variant-patch-c", activityId: "practice-patch-constraint", variables: { system: "HISTORIAN-02", patch: "PATCH-2026-205", severity: "High", constraint: "data retention window", mitigation: "scheduled implementation" } },
+    { id: "variant-account-a", activityId: "practice-expired-temp-admin", variables: { account: "vendor-temp", owner: "GridTech Services", expires: "yesterday" } },
+    { id: "variant-account-b", activityId: "practice-expired-temp-admin", variables: { account: "contractor-admin", owner: "Project Support", expires: "last Friday" } },
+    { id: "variant-account-c", activityId: "practice-expired-temp-admin", variables: { account: "temporary-engineer", owner: "Engineering", expires: "two days ago" } }
+  ];
+}
+
+function learningProgramSeeds(): Array<Omit<LearningProgram, "createdAt" | "updatedAt">> {
+  return [
+    {
+      id: "program-cybersecurity-operations-readiness",
+      title: "Cybersecurity Operations Readiness",
+      description: "Build operational capability across access, system security, incident response, change, and monitoring, then apply it in a North Valley capstone.",
+      status: "PUBLISHED",
+      audience: ["Cybersecurity", "Operations", "IT Infrastructure"],
+      certificateEnabled: true,
+      capstoneScenarioId: "scenario-capstone-cyber-ops-night-shift",
+      stages: [
+        { id: "ops-foundation", title: "Foundation", items: [{ id: "ops-cip005", type: "COURSE", targetId: "course-cip005-esp-access", required: true }] },
+        { id: "ops-system-security", title: "System Security", items: [{ id: "ops-cip007", type: "COURSE", targetId: "course-cip007-system-security", required: true }, { id: "ops-patch-practice", type: "PRACTICE", targetId: "practice-patch-constraint", required: true }, { id: "ops-system-review", type: "SCENARIO", targetId: "scenario-ops-srv-12-review", required: true }] },
+        { id: "ops-incident", title: "Incident Response", items: [{ id: "ops-cip008", type: "COURSE", targetId: "course-cip008-incident-response", required: true }, { id: "ops-incident-practice", type: "PRACTICE", targetId: "practice-suspicious-remote-connection", required: true }] },
+        { id: "ops-change-monitor", title: "Change & Monitoring", items: [{ id: "ops-cip010", type: "COURSE", targetId: "course-cip010-change-vulnerability", required: true }, { id: "ops-cip015", type: "COURSE", targetId: "course-cip015-insm", required: true }] },
+        { id: "ops-capstone", title: "Capstone", items: [{ id: "ops-capstone-night-shift", type: "CAPSTONE", targetId: "scenario-capstone-cyber-ops-night-shift", required: true }] }
+      ]
+    },
+    {
+      id: "program-compliance-control-owner",
+      title: "Compliance & Control Owner Readiness",
+      description: "Practice scope, governance, supervisor decisions, evidence quality, and audit package defense.",
+      status: "PUBLISHED",
+      audience: ["Compliance", "Managers", "Control Owners"],
+      certificateEnabled: true,
+      capstoneScenarioId: "scenario-capstone-audit-readiness",
+      stages: [
+        { id: "cco-scope", title: "Scope & Governance", items: [{ id: "cco-cip002", type: "COURSE", targetId: "course-cip002-categorization", required: true }, { id: "cco-cip003", type: "COURSE", targetId: "course-cip003-security-management", required: true }] },
+        { id: "cco-supervisor", title: "Personnel Oversight", items: [{ id: "cco-supervisor", type: "COURSE", targetId: "course-cip004-supervisor-workshop", required: true }] },
+        { id: "cco-audit", title: "Audit Readiness", items: [{ id: "cco-audit-course", type: "COURSE", targetId: "course-audit-preparation", required: true }, { id: "cco-evidence-practice", type: "PRACTICE", targetId: "practice-missing-evidence", required: true }, { id: "cco-capstone", type: "CAPSTONE", targetId: "scenario-capstone-audit-readiness", required: true }] }
+      ]
+    },
+    {
+      id: "program-personnel-access-readiness",
+      title: "Personnel & Access Readiness",
+      description: "Connect personnel events, electronic access, physical access, manager decisions, and evidence.",
+      status: "PUBLISHED",
+      audience: ["Operations", "Managers", "Access Owners"],
+      certificateEnabled: true,
+      capstoneScenarioId: "scenario-capstone-personnel-access",
+      stages: [
+        { id: "par-foundation", title: "Personnel Foundation", items: [{ id: "par-foundations", type: "COURSE", targetId: "course-cip004-foundations", required: true }, { id: "par-annual", type: "COURSE", targetId: "course-cip004-annual-refresher", required: false }] },
+        { id: "par-access", title: "Access Channels", items: [{ id: "par-cip005", type: "COURSE", targetId: "course-cip005-esp-access", required: true }, { id: "par-cip006", type: "COURSE", targetId: "course-cip006-physical-security", required: true }] },
+        { id: "par-capstone", title: "Capstone", items: [{ id: "par-capstone-workshop", type: "CAPSTONE", targetId: "scenario-capstone-personnel-access", required: true }] }
+      ]
+    }
+  ];
+}
+
+function assignmentBundleSeeds(): Array<Omit<LearningAssignmentBundle, "createdAt" | "updatedAt">> {
+  return [
+    {
+      id: "bundle-cip007-readiness",
+      title: "CIP-007 Readiness",
+      description: "A focused bundle for system security training, patch practice, and the OPS-SRV-12 capstone.",
+      itemIds: [
+        { type: "COURSE", targetId: "course-cip007-system-security", required: true },
+        { type: "PRACTICE", targetId: "practice-patch-constraint", required: true },
+        { type: "SCENARIO", targetId: "scenario-ops-srv-12-review", required: true }
+      ]
+    }
+  ];
+}
+
+function coachingGuideSeeds(): Array<Omit<SkillCoachingGuide, "createdAt" | "updatedAt">> {
+  return [
+    { id: "coaching-patch-management", skillId: "skill-patch-management", prompts: ["How do you distinguish applicability from implementation?", "What information should be documented when implementation is delayed?", "What would make the patch decision traceable later?"], suggestedPracticeIds: ["practice-patch-constraint"] },
+    { id: "coaching-evidence-quality", skillId: "skill-evidence-quality", prompts: ["Could another reviewer reconstruct who did what and when?", "Does the record connect the population, sample, result, and owner?", "What should be documented instead of rewritten?"], suggestedPracticeIds: ["practice-missing-evidence", "practice-access-approval-quality"] },
+    { id: "coaching-access-management", skillId: "skill-access-management", prompts: ["What changed about the person's responsibilities?", "Which access still has a current approved need?", "What owner should review and approve changes?"], suggestedPracticeIds: ["practice-access-approval-quality", "practice-expired-temp-admin"] },
+    { id: "coaching-network-monitoring", skillId: "skill-network-monitoring", prompts: ["What traffic is expected for this path?", "Where is visibility partial or missing?", "What context is needed before concluding the activity is malicious?"], suggestedPracticeIds: ["practice-monitoring-blind-spot", "practice-suspicious-remote-connection"] }
+  ];
+}
+
+function buildCapstoneScenarios(): Array<Omit<ScenarioDefinition, "createdAt" | "updatedAt">> {
+  const capstone = (id: string, title: string, description: string, relatedCourseIds: string[], skillIds: string[], workspaceType: ScenarioDefinition["workspaceType"], prompt: string, recommended: string): Omit<ScenarioDefinition, "createdAt" | "updatedAt"> => ({
+    id,
+    title,
+    description,
+    category: "Capstone",
+    difficulty: "ADVANCED",
+    estimatedMinutes: id.includes("audit") ? 18 : 20,
+    relatedCourseIds,
+    skillIds,
+    topicIds: skillIds,
+    initialState: { mode: "capstone", supportMode: "STANDARD" },
+    repeatable: true,
+    objectives: skillIds.slice(0, 5).map((skillId, index) => ({ id: `${id}-objective-${index + 1}`, label: ["Determine known facts", "Verify authorization", "Preserve evidence", "Document conclusion", "Escalate appropriately"][index] ?? "Apply the skill", skillId, required: true })),
+    workspaceType,
+    resultRules: [{ id: `${id}-strong`, result: "STRONG", minRecommendedChoices: 3 }, { id: `${id}-developing`, result: "DEVELOPING", minRecommendedChoices: 2 }],
+    steps: [
+      { id: `${id}-brief`, stepType: "INFORMATION", title: "Mission briefing", narrative: prompt, choices: [{ id: "begin", label: "Begin investigation", feedback: "Use the available tools before drawing conclusions.", principleTags: ["investigation"], impact: [{ field: "briefed", value: true }], nextStepId: `${id}-facts`, quality: "ACCEPTABLE" }] },
+      { id: `${id}-facts`, stepType: "DECISION", title: "Known facts", narrative: "Which action best supports a defensible investigation?", choices: [{ id: "collect", label: "Collect relevant facts across tools before concluding", feedback: "Recommended. Distributed information has to be connected.", principleTags: ["verification", "evidence"], impact: [{ field: "factsCollected", value: true }], nextStepId: `${id}-evidence`, quality: "RECOMMENDED" }, { id: "conclude", label: "Write the conclusion immediately", feedback: "Premature conclusions can miss context.", principleTags: ["verification"], impact: [{ field: "prematureConclusion", value: true }], nextStepId: `${id}-evidence`, quality: "RISKY" }] },
+      { id: `${id}-evidence`, stepType: "DECISION", title: "Evidence", narrative: "What should be preserved or summarized?", choices: [{ id: "relevant", label: recommended, feedback: "Recommended. This keeps the conclusion tied to observable information.", principleTags: ["evidence"], impact: [{ field: "evidenceQuality", value: "strong" }], nextStepId: `${id}-conclusion`, quality: "RECOMMENDED" }, { id: "thin", label: "A short note that the activity was handled", feedback: "Too thin. Another reviewer may not understand the basis.", principleTags: ["documentation"], impact: [{ field: "evidenceQuality", value: "thin" }], nextStepId: `${id}-conclusion`, quality: "RISKY" }] },
+      { id: `${id}-conclusion`, stepType: "DECISION", title: "Conclusion", narrative: "How should the capstone close?", choices: [{ id: "document", label: "Document known facts, gaps, owner actions, and escalation", feedback: "Recommended. This supports continuity and learning evidence.", principleTags: ["documentation", "escalation"], impact: [{ field: "conclusionQuality", value: "strong" }], quality: "RECOMMENDED" }, { id: "fabricate", label: "Fill in missing details so the package looks complete", feedback: "Never fabricate missing historical evidence. Record factual status and route gaps.", principleTags: ["factual integrity"], impact: [{ field: "factualIntegrityIssue", value: true }], quality: "INCORRECT" }] }
+    ]
+  });
+  return [
+    capstone("scenario-capstone-cyber-ops-night-shift", "Cybersecurity Operations Capstone - North Valley Night Shift", "Investigate unexpected connection, expired temporary account, configuration drift, patch constraint, and monitoring blind spot.", ["course-cip005-esp-access", "course-cip007-system-security", "course-cip008-incident-response", "course-cip010-change-vulnerability", "course-cip015-insm"], ["skill-incident-recognition", "skill-account-management", "skill-system-hardening", "skill-patch-management", "skill-network-monitoring", "skill-evidence-quality"], "INCIDENT_CONSOLE", "At 02:12 North Valley detects unusual activity. The relevant facts are split across incident, system, access, network, and maintenance tools.", "Event record, access status, system state, maintenance context, monitoring coverage, and documented conclusion"),
+    capstone("scenario-capstone-audit-readiness", "Audit Readiness Capstone - Evidence Package Review", "Review requirement context, procedure, population, samples, evidence, exceptions, and reviewer questions.", ["course-cip002-categorization", "course-cip003-security-management", "course-audit-preparation"], ["skill-audit-readiness", "skill-evidence-quality", "skill-control-ownership"], "AUDIT_WORKSPACE", "A reviewer asks whether a North Valley access-review package is ready. The package includes a population discrepancy, missing approval, stale exception, wrong procedure version, and unsupported narrative claim.", "Known gaps, evidence available, items requiring clarification, owners, and actions"),
+    capstone("scenario-capstone-personnel-access", "Personnel & Access Decision Workshop", "Apply access and personnel principles across new hire, role transfer, temporary assignment, contract end, and termination events.", ["course-cip004-foundations", "course-cip004-annual-refresher", "course-cip005-esp-access", "course-cip006-physical-security"], ["skill-personnel-security", "skill-access-management", "skill-physical-access", "skill-evidence-quality"], "ACCESS_MANAGER", "North Valley has multiple personnel events. Each may affect training, electronic access, physical access, approvals, and evidence.", "Trigger, owner, access impact, physical access impact, training review, required evidence, and follow-through")
+  ];
+}
+
+function attachCoursePreAssessments(data: AppData) {
+  const longerCourses = ["course-cip005-esp-access", "course-cip007-system-security", "course-cip008-incident-response", "course-cip010-change-vulnerability", "course-cip013-supply-chain", "course-cip015-insm", "course-audit-preparation"];
+  longerCourses.forEach((courseId) => {
+    const course = data.courses.find((item) => item.id === courseId);
+    if (!course) return;
+    course.preAssessmentEnabled = true;
+    const version = data.courseVersions.find((item) => item.id === course.currentVersionId);
+    if (!version) return;
+    const existingBlock = data.contentBlocks.find((block) => block.id === `${courseId}-preassessment-brief`);
+    const firstLesson = data.lessons.filter((lesson) => lesson.courseVersionId === version.id).sort((a, b) => a.position - b.position)[0];
+    if (!existingBlock && firstLesson) {
+      data.contentBlocks.push(stamp({
+        id: `${courseId}-preassessment-brief`,
+        lessonId: firstLesson.id,
+        type: "quick_recall",
+        title: "Check Your Starting Point",
+        body: "Answer this short practice question to identify focus areas. It does not complete or bypass course requirements.",
+        position: 0,
+        required: false,
+        data: { prompt: "Which statement best describes this course topic?", options: ["Follow a controlled process and retain evidence", "Use informal shortcuts when work is urgent", "Wait for audit to clarify responsibility"], correctResponse: "Follow a controlled process and retain evidence", explanation: "The pre-assessment highlights focus areas only; course requirements remain unchanged." }
+      }));
+    }
+  });
 }
 
 function addLearningExperience4Seed(data: AppData) {

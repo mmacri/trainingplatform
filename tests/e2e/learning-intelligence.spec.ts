@@ -29,12 +29,12 @@ test.beforeEach(async ({ page }) => {
 
 test("learner completes practice and sees skill evidence", async ({ page }) => {
   await login(page, "learner@gridguard.local");
-  await page.getByRole("link", { name: /Practice/ }).click();
+  await page.goto("/#/practice");
   await expect(page.getByRole("heading", { name: "Practice", exact: true })).toBeVisible();
 
-  await page.getByRole("link", { name: /Practice Now/ }).first().click();
-  await expect(page.getByRole("heading", { name: /Decision/ })).toBeVisible();
-  await page.getByRole("button").filter({ hasText: /Identify|approved|report|review|process|Preserve|Deny|Evaluate/i }).first().click();
+  await page.goto("/#/practice/practice-unexpected-mfa");
+  await expect(page.getByRole("heading", { name: "Unexpected MFA" })).toBeVisible();
+  await page.getByRole("button", { name: "Deny and report" }).click();
   await page.getByRole("button", { name: "Complete Challenge" }).click();
   await expect(page.getByRole("heading", { name: "Challenge Complete" })).toBeVisible();
 
