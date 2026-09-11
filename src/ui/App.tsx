@@ -48,6 +48,7 @@ import {
   canViewCompliance,
   canViewEvidence,
   canViewTeam,
+  calculateCourseReadiness,
   getCourseCompletionState,
   getCoachingOpportunities,
   getRoles,
@@ -64,6 +65,7 @@ import { LearnerGoalService } from "../services/learnerGoalService";
 import { LearningSearchService } from "../services/learningSearchService";
 import { LearningSessionService } from "../services/learningSessionService";
 import { LearningTimeService } from "../services/learningTimeService";
+import { LearningContentValidator } from "../services/learningContentValidator";
 import { MicroLearningRouteService } from "../services/microLearningRouteService";
 import { PracticeSetService } from "../services/practiceSetService";
 import { ProgramService } from "../services/programService";
@@ -295,7 +297,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
   return (
     <div className="min-h-screen bg-background text-foreground">
       <header className="no-print sticky top-0 z-40 flex h-16 items-center gap-3 border-b border-border bg-white px-4 dark:bg-slate-950">
-        <button className="lg:hidden" aria-label="Open navigation" onClick={() => setNavOpen(true)}>
+        <button className="flex min-h-11 min-w-11 items-center justify-center rounded-md lg:hidden" aria-label="Open navigation" onClick={() => setNavOpen(true)}>
           <Menu />
         </button>
         <Link to="/home" className="flex items-center gap-3">
@@ -304,19 +306,19 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
           </span>
           <span className="hidden font-semibold sm:block">GridGuard Learning</span>
         </Link>
-        <button className="ml-auto hidden h-10 min-w-72 items-center gap-2 rounded-md border border-border px-3 text-left text-sm text-muted-foreground md:flex" onClick={() => setSearchOpen(true)}>
+        <button className="ml-auto hidden h-11 min-w-72 items-center gap-2 rounded-md border border-border px-3 text-left text-sm text-muted-foreground md:flex" onClick={() => setSearchOpen(true)}>
           <Search size={17} /> Search courses, standards, evidence
         </button>
         {canCreateCourses(data, user.id) ? <QuickCreate /> : null}
-        <button className="relative rounded-md border border-border p-2" aria-label="Notifications" onClick={() => toast(`${unread} unread notifications`)}>
+        <button className="relative flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border p-2" aria-label="Notifications" onClick={() => toast(`${unread} unread notifications`)}>
           <Bell size={18} />
           {unread ? <span className="absolute -right-1 -top-1 rounded-full bg-red-600 px-1.5 text-[10px] text-white">{unread}</span> : null}
         </button>
-        <button className="rounded-md border border-border p-2" aria-label="Search" onClick={() => setSearchOpen(true)}>
+        <button className="flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border p-2" aria-label="Search" onClick={() => setSearchOpen(true)}>
           <Search size={18} />
         </button>
         <div className="relative">
-          <button className="flex items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm" onClick={() => setSwitchOpen(true)}>
+          <button className="flex min-h-11 items-center gap-2 rounded-md border border-border px-2 py-1.5 text-sm" onClick={() => setSwitchOpen(true)}>
             <span className="flex h-7 w-7 items-center justify-center rounded-md bg-slate-800 text-xs text-white">{user.firstName[0]}{user.lastName[0]}</span>
             <span className="hidden md:block">{user.firstName}</span>
           </button>
@@ -326,7 +328,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
         <aside className={`no-print fixed inset-y-0 left-0 z-50 w-72 border-r border-border bg-white p-3 transition-transform dark:bg-slate-950 lg:sticky lg:top-16 lg:h-[calc(100vh-4rem)] ${navOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}>
           <div className="mb-3 flex items-center justify-between lg:hidden">
             <span className="font-semibold">Navigation</span>
-            <button onClick={() => setNavOpen(false)} aria-label="Close navigation"><X /></button>
+            <button className="flex min-h-11 min-w-11 items-center justify-center rounded-md" onClick={() => setNavOpen(false)} aria-label="Close navigation"><X /></button>
           </div>
           <nav className="space-y-1">
             {nav.map((item) => (
@@ -338,7 +340,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
           <div className="absolute bottom-3 left-3 right-3 text-xs text-muted-foreground">
             <div className="mb-3 flex gap-2">
               {["light", "dark", "system"].map((mode) => (
-                <button key={mode} className={`rounded-md border border-border px-2 py-1 ${theme === mode ? "bg-muted text-foreground" : ""}`} onClick={() => setTheme(mode)}>
+                <button key={mode} className={`min-h-11 rounded-md border border-border px-2 py-1 ${theme === mode ? "bg-muted text-foreground" : ""}`} onClick={() => setTheme(mode)}>
                   {mode === "dark" ? <Moon size={14} /> : mode === "light" ? <Sun size={14} /> : mode}
                 </button>
               ))}
@@ -392,6 +394,7 @@ function AuthenticatedShell({ onLogout, onSwitch }: { onLogout: () => void; onSw
             <Route path="/progress/portfolio" element={<LearnerPortfolioPage />} />
             <Route path="/records/:courseId" element={<TrainingRecord />} />
             <Route path="/build" element={<Guard allow={canManageCourses(data, user.id)} label="Course Management"><CourseManagementDashboard /></Guard>} />
+            <Route path="/build/quality" element={<Guard allow={canManageCourses(data, user.id)} label="Course Quality"><CourseQualityDashboard /></Guard>} />
             <Route path="/build/practice" element={<Guard allow={canManageCourses(data, user.id)} label="Practice Activities"><PracticeAuthoring /></Guard>} />
             <Route path="/build/scenarios" element={<Guard allow={canManageCourses(data, user.id)} label="Scenario Builder"><ScenarioAuthoring /></Guard>} />
             <Route path="/build/new" element={<Guard allow={canCreateCourses(data, user.id)} label="Create Course"><CourseCreationWizard /></Guard>} />
@@ -450,7 +453,10 @@ function buildNav(data: AppData, userId: string) {
     items.push({ label: "Team Learning", href: "/team", icon: UsersRound });
     items.push({ label: "Coaching", href: "/team/coaching", icon: ClipboardCheck });
   }
-  if (canManageCourses(data, userId)) items.push({ label: "Course Management", href: "/build", icon: ClipboardCheck });
+  if (canManageCourses(data, userId)) {
+    items.push({ label: "Course Management", href: "/build", icon: ClipboardCheck });
+    items.push({ label: "Course Quality", href: "/build/quality", icon: FileCheck2 });
+  }
   if (canViewCompliance(data, userId)) {
     items.push({ label: "Compliance", href: "/compliance", icon: ShieldCheck });
     items.push({ label: "Standards", href: "/standards", icon: Library });
@@ -1243,7 +1249,7 @@ function LearningDrawer({ title, children, onClose }: { title: string; children:
       <div className="ml-auto h-full w-full max-w-md overflow-y-auto border-l border-border bg-background p-5 shadow-xl">
         <div className="flex items-center justify-between gap-3">
           <h2 className="text-lg font-semibold">{title}</h2>
-          <button className="rounded-md border border-border p-2" aria-label={`Close ${title}`} onClick={onClose}><X size={16} /></button>
+          <button className="flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border p-2" aria-label={`Close ${title}`} onClick={onClose}><X size={16} /></button>
         </div>
         <div className="mt-5">{children}</div>
       </div>
@@ -1919,7 +1925,8 @@ function EnvironmentExplorer() {
   const world = TrainingWorldService.primaryWorld(data);
   const [tab, setTab] = useState("Overview");
   if (!world) return <NotFound />;
-  return <><PageHeader title={world.name} subtitle={world.description} action={<div className="flex flex-wrap gap-2"><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/environment/timeline">Story Timeline</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/environment/map">Environment Map</Link></div>} /><Tabs items={["Overview", "People", "Facilities", "Systems", "Vendors", "Relationships"]} active={tab} onChange={setTab} />{tab === "Overview" ? <Panel className="mt-4"><h2 className="text-lg font-semibold">Fictional Training Environment</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">North Valley Energy provides recurring people, systems, facilities, vendors, and evidence artifacts so learners can investigate realistic situations across courses instead of reading isolated examples.</p><div className="mt-4 grid gap-3 md:grid-cols-4"><Info label="People" value={world.people.length} /><Info label="Systems" value={world.systems.length} /><Info label="Facilities" value={world.facilities.length} /><Info label="Vendors" value={world.vendors.length} /></div></Panel> : null}{tab === "People" ? <WorldGrid items={world.people} render={(person) => <><h3 className="font-semibold">{person.name}</h3><p className="text-sm text-muted-foreground">{person.title}</p><p className="mt-2 text-sm">{person.roleSummary}</p></>} /> : null}{tab === "Facilities" ? <WorldGrid items={world.facilities} render={(facility) => <><h3 className="font-semibold">{facility.name}</h3><p className="text-sm text-muted-foreground">{facility.facilityType} · {facility.locationSummary}</p><p className="mt-2 text-sm">{facility.description}</p></>} /> : null}{tab === "Systems" ? <WorldGrid items={world.systems} render={(system) => <><h3 className="font-semibold">{system.name}</h3><p className="text-sm text-muted-foreground">{system.systemType} · Owner: {system.owner}</p><p className="mt-2 text-sm">{system.description}</p><dl className="mt-2 text-xs text-muted-foreground">{Object.entries(system.attributes).map(([key, value]) => <div key={key}><dt className="inline font-medium">{titleize(key)}: </dt><dd className="inline">{value}</dd></div>)}</dl></>} /> : null}{tab === "Vendors" ? <WorldGrid items={world.vendors} render={(vendor) => <><h3 className="font-semibold">{vendor.name}</h3><p className="mt-2 text-sm">{vendor.description}</p><p className="mt-2 text-xs text-muted-foreground">Services: {vendor.services.join(", ")}</p></>} /> : null}{tab === "Relationships" ? <Panel className="mt-4"><div className="space-y-2">{world.relationships.map((relationship) => <div key={relationship.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{relationship.sourceId} → {relationship.targetId}</p><p className="text-muted-foreground">{relationship.label}</p></div>)}</div></Panel> : null}</>;
+  const entityLabel = (id: string) => TrainingWorldService.entityById(data, id)?.item.name ?? id;
+  return <><PageHeader title={world.name} subtitle={world.description} action={<div className="flex flex-wrap gap-2"><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/environment/timeline">Story Timeline</Link><Link className="rounded-md border border-border px-3 py-2 text-sm" to="/environment/map">Environment Map</Link></div>} /><Tabs items={["Overview", "People", "Facilities", "Systems", "Vendors", "Relationships"]} active={tab} onChange={setTab} />{tab === "Overview" ? <Panel className="mt-4"><h2 className="text-lg font-semibold">Fictional Training Environment</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">North Valley Energy provides recurring people, systems, facilities, vendors, and evidence artifacts so learners can investigate realistic situations across courses instead of reading isolated examples.</p><div className="mt-4 grid gap-3 md:grid-cols-4"><Info label="People" value={world.people.length} /><Info label="Systems" value={world.systems.length} /><Info label="Facilities" value={world.facilities.length} /><Info label="Vendors" value={world.vendors.length} /></div></Panel> : null}{tab === "People" ? <WorldGrid items={world.people} render={(person) => <><h3 className="font-semibold">{person.name}</h3><p className="text-sm text-muted-foreground">{person.title}</p><p className="mt-2 text-sm">{person.roleSummary}</p></>} /> : null}{tab === "Facilities" ? <WorldGrid items={world.facilities} render={(facility) => <><h3 className="font-semibold">{facility.name}</h3><p className="text-sm text-muted-foreground">{facility.facilityType} · {facility.locationSummary}</p><p className="mt-2 text-sm">{facility.description}</p></>} /> : null}{tab === "Systems" ? <WorldGrid items={world.systems} render={(system) => <><h3 className="font-semibold">{system.name}</h3><p className="text-sm text-muted-foreground">{system.systemType} · Owner: {system.owner}</p><p className="mt-2 text-sm">{system.description}</p><dl className="mt-2 text-xs text-muted-foreground">{Object.entries(system.attributes).map(([key, value]) => <div key={key}><dt className="inline font-medium">{titleize(key)}: </dt><dd className="inline">{value}</dd></div>)}</dl></>} /> : null}{tab === "Vendors" ? <WorldGrid items={world.vendors} render={(vendor) => <><h3 className="font-semibold">{vendor.name}</h3><p className="mt-2 text-sm">{vendor.description}</p><p className="mt-2 text-xs text-muted-foreground">Services: {vendor.services.join(", ")}</p></>} /> : null}{tab === "Relationships" ? <Panel className="mt-4"><div className="space-y-2">{world.relationships.map((relationship) => <div key={relationship.id} className="rounded-md border border-border p-3 text-sm"><p className="font-medium">{entityLabel(relationship.sourceId)} → {entityLabel(relationship.targetId)}</p><p className="text-muted-foreground">{relationship.label}</p></div>)}</div></Panel> : null}</>;
 }
 
 function WorldGrid<T extends { id: string }>({ items, render }: { items: T[]; render: (item: T) => ReactNode }) {
@@ -1945,7 +1952,8 @@ function EnvironmentMapPage() {
   ];
   const selected = nodes.find((node) => node.id === selectedId) ?? nodes[0];
   const relatedEvents = data.trainingWorldEvents.filter((event) => event.entityIds.includes(selected?.id ?? ""));
-  return <><PageHeader title="North Valley Environment Map" subtitle="A touch-friendly map of recurring facilities, systems, people, vendors, and relationships." /><div className="grid gap-5 xl:grid-cols-[1fr_340px]"><Panel><div className="grid gap-3 md:grid-cols-3">{nodes.map((node) => <button key={node.id} className={`min-h-24 rounded-md border p-3 text-left text-sm ${selected?.id === node.id ? "border-cyan-700 bg-cyan-50 dark:bg-cyan-950" : "border-border"}`} onClick={() => setSelectedId(node.id)}><span className="text-xs uppercase tracking-wide text-muted-foreground">{node.type}</span><span className="mt-1 block font-semibold">{node.label}</span></button>)}</div><div className="mt-5 rounded-md border border-border p-4"><h2 className="font-semibold">Relationships</h2><div className="mt-3 grid gap-2 md:grid-cols-2">{world.relationships.slice(0, 12).map((relationship) => <div key={relationship.id} className="rounded-md bg-muted/60 p-2 text-xs"><span className="font-medium">{relationship.label}</span><span className="block text-muted-foreground">{relationship.sourceId} → {relationship.targetId}</span></div>)}</div></div></Panel><Panel><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{selected?.type}</p><h2 className="mt-1 text-xl font-semibold">{selected?.label}</h2><p className="mt-2 text-sm text-muted-foreground">{selected?.detail}</p><h3 className="mt-5 font-semibold">Appears In</h3><div className="mt-2 space-y-2">{relatedEvents.map((event) => <Link key={event.id} className="block rounded-md border border-border p-3 text-sm" to="/environment/timeline">{event.title}<span className="block text-xs text-muted-foreground">{event.relatedCourseIds.map((courseId) => data.courses.find((course) => course.id === courseId)?.shortTitle ?? data.courses.find((course) => course.id === courseId)?.title).filter(Boolean).join(", ")}</span></Link>)}</div>{selected?.id === "system-ops-srv-12" ? <Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/courses/course-cip007-system-security">Open CIP-007</Link> : null}</Panel></div></>;
+  const entityLabel = (id: string) => TrainingWorldService.entityById(data, id)?.item.name ?? id;
+  return <><PageHeader title="North Valley Environment Map" subtitle="A touch-friendly map of recurring facilities, systems, people, vendors, and relationships." /><div className="grid gap-5 xl:grid-cols-[1fr_340px]"><Panel><div className="grid gap-3 md:grid-cols-3">{nodes.map((node) => <button key={node.id} className={`min-h-24 rounded-md border p-3 text-left text-sm ${selected?.id === node.id ? "border-cyan-700 bg-cyan-50 dark:bg-cyan-950" : "border-border"}`} onClick={() => setSelectedId(node.id)}><span className="text-xs uppercase tracking-wide text-muted-foreground">{node.type}</span><span className="mt-1 block font-semibold">{node.label}</span></button>)}</div><div className="mt-5 rounded-md border border-border p-4"><h2 className="font-semibold">Relationships</h2><div className="mt-3 grid gap-2 md:grid-cols-2">{world.relationships.slice(0, 12).map((relationship) => <div key={relationship.id} className="rounded-md bg-muted/60 p-2 text-xs"><span className="font-medium">{relationship.label}</span><span className="block text-muted-foreground">{entityLabel(relationship.sourceId)} → {entityLabel(relationship.targetId)}</span></div>)}</div></div></Panel><Panel><p className="text-xs font-semibold uppercase tracking-wide text-cyan-700">{selected?.type}</p><h2 className="mt-1 text-xl font-semibold">{selected?.label}</h2><p className="mt-2 text-sm text-muted-foreground">{selected?.detail}</p><h3 className="mt-5 font-semibold">Appears In</h3><div className="mt-2 space-y-2">{relatedEvents.map((event) => <Link key={event.id} className="block rounded-md border border-border p-3 text-sm" to="/environment/timeline">{event.title}<span className="block text-xs text-muted-foreground">{event.relatedCourseIds.map((courseId) => data.courses.find((course) => course.id === courseId)?.shortTitle ?? data.courses.find((course) => course.id === courseId)?.title).filter(Boolean).join(", ")}</span></Link>)}</div>{selected?.id === "system-ops-srv-12" ? <Link className="mt-4 inline-flex rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" to="/courses/course-cip007-system-security">Open CIP-007</Link> : null}</Panel></div></>;
 }
 
 function InvestigationDetailPage() {
@@ -2400,6 +2408,104 @@ function AboutPage() {
   return <><PageHeader title="About" /><Panel><h1 className="text-2xl font-semibold">GridGuard Learning</h1><p className="mt-2">NERC CIP Training & Compliance Readiness</p><Info label="Version" value="0.1.0"/><Info label="Deployment" value="GitHub Edition"/><Info label="Storage" value="Browser Local"/><Info label="Application Status" value="Operational"/></Panel></>;
 }
 
+type QualityStatus = "READY" | "REVIEW" | "BLOCKED";
+
+function CourseQualityDashboard() {
+  const { data } = useApp();
+  const publishedCourses = data.courses
+    .filter((course) => course.status === "PUBLISHED" && course.showInCatalog)
+    .sort((left, right) => left.title.localeCompare(right.title));
+  const rows = publishedCourses.map((course) => {
+    const readiness = calculateCourseReadiness(data, course.id);
+    const health = ContentHealthService.getCourseHealth(data, course.id);
+    const audit = CourseDepthAuditService.auditCourse(data, course.id);
+    const validation = LearningContentValidator.validateCourse(data, course.id);
+    const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId);
+    const blocks = data.contentBlocks.filter((block) => lessons.some((lesson) => lesson.id === block.lessonId));
+    const assessments = data.assessments.filter((assessment) => assessment.courseVersionId === course.currentVersionId);
+    const questions = assessments.flatMap((assessment) => data.assessmentQuestions
+      .filter((item) => item.assessmentId === assessment.id)
+      .map((item) => data.questions.find((question) => question.id === item.questionId))
+      .filter(Boolean) as Question[]);
+    const duplicateCount = questions.length - new Set(questions.map((question) => normalizeQualityText(question.prompt))).size;
+    const formulaicPrompts = questions.filter((question) => /^(in\s+)?cip-\d{3}.*lesson\s+\d+|strongest learner action/i.test(question.prompt));
+    const resources = data.learningResources.filter((resource) => resource.relatedCourseIds.includes(course.id));
+    const scenarios = data.scenarioDefinitions.filter((scenario) => scenario.relatedCourseIds.includes(course.id));
+    const hasInteraction = blocks.some((block) => ["knowledge_check", "quick_recall", "classification", "matching", "sequence_builder", "decision_cards", "evidence_inspector", "system_inspector", "network_explorer", "artifact_review", "record_repair", "rapid_decisions"].includes(block.type));
+    const hasVisual = blocks.some((block) => ["learning_diagram", "process_diagram", "timeline", "network_explorer", "system_inspector", "artifact_review", "quality_comparison"].includes(block.type));
+    const statuses = {
+      content: readiness.blockingIssues.length || audit.dimensions.contentDepth === "NEEDS_ATTENTION" ? "REVIEW" : "READY",
+      interactions: hasInteraction && audit.dimensions.activePractice === "STRONG" ? "READY" : "REVIEW",
+      scenario: scenarios.length && audit.dimensions.scenarioQuality === "STRONG" ? "READY" : "REVIEW",
+      assessment: formulaicPrompts.length || duplicateCount > Math.max(1, Math.floor(questions.length * 0.1)) ? "BLOCKED" : audit.dimensions.assessmentQuality === "STRONG" ? "READY" : "REVIEW",
+      completion: readiness.blockingIssues.some((issue) => issue.category === "Completion") ? "BLOCKED" : "READY",
+      reference: resources.length && audit.dimensions.referenceValue === "STRONG" ? "READY" : "REVIEW",
+      accessibility: hasInteraction || hasVisual ? "REVIEW" : "READY",
+      responsive: hasVisual ? "REVIEW" : "READY",
+      automatedTest: course.id === "course-cip004-annual-refresher" || course.id === "course-cip007-system-security" ? "READY" : "REVIEW"
+    } satisfies Record<string, QualityStatus>;
+    const overall: QualityStatus = validation.some((item) => item.severity === "BLOCKED") || health.state === "Blocking Issues" || Object.values(statuses).includes("BLOCKED") ? "BLOCKED" : health.state === "Needs Attention" || audit.overallState !== "STRONG" || Object.values(statuses).includes("REVIEW") || validation.some((item) => item.severity === "REVIEW") ? "REVIEW" : "READY";
+    const findings = [
+      ...readiness.blockingIssues.map((issue) => `${issue.category}: ${issue.message}`),
+      ...readiness.warnings.map((issue) => `${issue.category}: ${issue.message}`),
+      ...health.signals,
+      ...validation.slice(0, 6).map((item) => `${item.category}: ${item.message}`),
+      ...audit.findings.filter((finding) => finding.severity !== "INFO").slice(0, 4).map((finding) => `${finding.category}: ${finding.message}`),
+      ...formulaicPrompts.map((question) => `Formulaic prompt: ${question.prompt.slice(0, 90)}`)
+    ];
+    return { course, statuses, overall, findings };
+  });
+  return (
+    <>
+      <PageHeader title="Course Quality" subtitle="Release readiness for published learner-facing courses using existing readiness, health, depth, assessment, completion, reference, accessibility, responsive, and automated-test signals." />
+      <Panel>
+        <div className="overflow-x-auto">
+          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
+            <thead>
+              <tr className="border-b border-border text-xs uppercase text-muted-foreground">
+                {["Course", "Content", "Interactions", "Scenario", "Assessment", "Completion", "Reference", "A11y", "Responsive", "Tests", "Overall"].map((header) => <th key={header} className="px-3 py-2 font-medium">{header}</th>)}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.course.id} className="border-b border-border align-top">
+                  <td className="px-3 py-3">
+                    <Link className="font-medium text-cyan-700" to={`/build/courses/${row.course.id}`}>{row.course.shortTitle ?? row.course.title}</Link>
+                    {row.findings.length ? <details className="mt-2"><summary className="cursor-pointer text-xs text-muted-foreground">Findings ({row.findings.length})</summary><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{row.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul></details> : null}
+                  </td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.content} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.interactions} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.scenario} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.assessment} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.completion} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.reference} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.accessibility} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.responsive} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.statuses.automatedTest} /></td>
+                  <td className="px-3 py-3"><QualityBadge status={row.overall} /></td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Panel>
+    </>
+  );
+}
+
+function QualityBadge({ status }: { status: QualityStatus }) {
+  const className = status === "READY"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"
+    : status === "BLOCKED"
+      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-100"
+      : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100";
+  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${className}`}>{status}</span>;
+}
+
+function normalizeQualityText(value: string) {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function DataManagement() {
   const { data, service, setData, toast } = useApp();
   const [storage, setStorage] = useState<{ usage?: number; quota?: number }>({});
@@ -2421,7 +2527,7 @@ function QuickCreate() {
     { label: "New Certification", href: "/admin", show: canManageUsers(data, user.id) },
     { label: "New User", href: "/admin/users", show: canManageUsers(data, user.id) }
   ].filter((action) => action.show);
-  return <div className="relative"><button className="rounded-md bg-cyan-700 p-2 text-white" aria-label="Quick create" onClick={() => setOpen(!open)}><Plus size={18}/></button>{open ? <div className="absolute right-0 top-11 z-50 w-52 rounded-md border border-border bg-white p-2 shadow-soft dark:bg-slate-950">{actions.map((item) => <button key={item.label} className="block w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOpen(false); navigate(item.href); }}>{item.label}</button>)}</div> : null}</div>;
+  return <div className="relative"><button className="flex min-h-11 min-w-11 items-center justify-center rounded-md bg-cyan-700 p-2 text-white" aria-label="Quick create" onClick={() => setOpen(!open)}><Plus size={18}/></button>{open ? <div className="absolute right-0 top-11 z-50 w-52 rounded-md border border-border bg-white p-2 shadow-soft dark:bg-slate-950">{actions.map((item) => <button key={item.label} className="block min-h-11 w-full rounded-md px-3 py-2 text-left text-sm hover:bg-muted" onClick={() => { setOpen(false); navigate(item.href); }}>{item.label}</button>)}</div> : null}</div>;
 }
 
 function DemoSwitcher({ onClose, onSwitch, onLogout }: { onClose: () => void; onSwitch: (userId: string) => void; onLogout: () => void }) {
@@ -2454,7 +2560,7 @@ function SearchDialog({ onClose }: { onClose: () => void }) {
 
 function NotesDrawer({ onClose }: { onClose: () => void }) {
   const [value, setValue] = useState(localStorage.getItem("gridguard.notes") ?? "");
-  return <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-border bg-white p-4 shadow-xl dark:bg-slate-950"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">My Notes</h2><button onClick={onClose}><X /></button></div><textarea className="mt-4 h-80 w-full rounded-md border border-border bg-transparent p-3" value={value} onChange={(event) => { setValue(event.target.value); localStorage.setItem("gridguard.notes", event.target.value); }} /><p className="mt-2 text-sm text-muted-foreground">Saved automatically.</p></div>;
+  return <div className="fixed inset-y-0 right-0 z-50 w-full max-w-md border-l border-border bg-white p-4 shadow-xl dark:bg-slate-950"><div className="flex items-center justify-between"><h2 className="text-lg font-semibold">My Notes</h2><button className="flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border" aria-label="Close notes" onClick={onClose}><X /></button></div><textarea className="mt-4 h-80 w-full rounded-md border border-border bg-transparent p-3" value={value} onChange={(event) => { setValue(event.target.value); localStorage.setItem("gridguard.notes", event.target.value); }} /><p className="mt-2 text-sm text-muted-foreground">Saved automatically.</p></div>;
 }
 
 function OfflineIndicator() {
@@ -2464,7 +2570,7 @@ function OfflineIndicator() {
 }
 
 function Modal({ title, children, onClose }: { title: string; children: React.ReactNode; onClose: () => void }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"><section role="dialog" aria-modal="true" aria-label={title} className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-md border border-border bg-white p-5 shadow-xl dark:bg-slate-950"><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-semibold">{title}</h2><button aria-label="Close" onClick={onClose}><X /></button></div>{children}</section></div>;
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/60 p-4"><section role="dialog" aria-modal="true" aria-label={title} className="max-h-[90vh] w-full max-w-2xl overflow-auto rounded-md border border-border bg-white p-5 shadow-xl dark:bg-slate-950"><div className="mb-4 flex items-center justify-between"><h2 className="text-xl font-semibold">{title}</h2><button className="flex min-h-11 min-w-11 items-center justify-center rounded-md border border-border" aria-label="Close" onClick={onClose}><X /></button></div>{children}</section></div>;
 }
 
 function Tabs({ items, active, onChange }: { items: string[]; active: string; onChange: (value: string) => void }) {

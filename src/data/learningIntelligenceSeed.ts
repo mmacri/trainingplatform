@@ -211,16 +211,17 @@ export function addLearningIntelligenceSeed(data: AppData) {
   addLearningExperience3Seed(data);
   addLearningExperience4Seed(data);
   addLearningExperience5Seed(data);
+  applyLearningExperience6Remediation(data);
 
   if (!data.applicationSettings.some((setting) => setting.key === "learningIntelligenceVersion")) {
     data.applicationSettings.push(stamp({ id: "setting_learning_intelligence_version", key: "learningIntelligenceVersion", value: 1 }));
   }
   const experienceSetting = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion");
   if (experienceSetting) {
-    experienceSetting.value = 5;
+    experienceSetting.value = 6;
     experienceSetting.updatedAt = iso(demoNow);
   } else {
-    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 5 }));
+    data.applicationSettings.push(stamp({ id: "setting_learning_experience_version", key: "learningExperienceVersion", value: 6 }));
   }
 
   return data;
@@ -238,6 +239,72 @@ function addLearningExperience5Seed(data: AppData) {
 
   buildCapstoneScenarios().forEach((scenario) => upsertById(data.scenarioDefinitions, stamp(scenario)));
   attachCoursePreAssessments(data);
+}
+
+function applyLearningExperience6Remediation(data: AppData) {
+  publishLearnerCourse(data, "course-cip005-esp-access");
+  publishLearnerCourse(data, "course-cip008-incident-response");
+  rewriteFormulaicAssessmentPrompts(data);
+}
+
+function publishLearnerCourse(data: AppData, courseId: string) {
+  const course = data.courses.find((item) => item.id === courseId);
+  if (!course || course.status === "DRAFT" || course.status === "ARCHIVED") return;
+  course.status = "PUBLISHED";
+  course.accessMode = "OPEN";
+  course.showInCatalog = true;
+  course.allowSelfEnrollment = true;
+  course.updatedAt = iso(demoNow);
+  data.courseVersions
+    .filter((version) => version.courseId === courseId && version.id === course.currentVersionId)
+    .forEach((version) => {
+      version.status = "PUBLISHED";
+      version.immutable = true;
+      version.publishedAt = version.publishedAt ?? iso(subDays(demoNow, 5));
+      version.updatedAt = iso(demoNow);
+    });
+}
+
+function rewriteFormulaicAssessmentPrompts(data: AppData) {
+  const seenByAssessment = new Map<string, Set<string>>();
+  data.assessmentQuestions
+    .slice()
+    .sort((left, right) => left.position - right.position)
+    .forEach((link) => {
+      const question = data.questions.find((item) => item.id === link.questionId);
+      if (!question) return;
+      question.prompt = rewritePrompt(question.prompt);
+      const seen = seenByAssessment.get(link.assessmentId) ?? new Set<string>();
+      const normalized = normalizePrompt(question.prompt);
+      if (seen.has(normalized)) {
+        question.prompt = `${question.prompt} Focus on the next best documented action.`;
+      }
+      seen.add(normalizePrompt(question.prompt));
+      seenByAssessment.set(link.assessmentId, seen);
+      question.updatedAt = iso(demoNow);
+    });
+}
+
+function rewritePrompt(prompt: string) {
+  const lessonMatch = prompt.match(/^In (CIP-\d{3}|CIP-\d{3} incident-response) lesson \d+, (.+?): what is the strongest learner action\?$/i);
+  if (lessonMatch) {
+    const standard = lessonMatch[1].replace(" incident-response", "");
+    const title = lessonMatch[2];
+    if (/evidence|record/i.test(title)) return `Which action creates a traceable record for "${title}"?`;
+    if (/access|authorization|privilege/i.test(title)) return `What best supports accountable access decisions in "${title}"?`;
+    if (/change|configuration|baseline|drift/i.test(title)) return `What keeps the work in "${title}" controlled and reviewable?`;
+    if (/vendor|supplier|contract/i.test(title)) return `What is the strongest supplier-risk action in "${title}"?`;
+    if (/incident|alert|timeline|facts/i.test(title)) return `What should the learner do with the facts presented in "${title}"?`;
+    if (/recovery|backup|exercise/i.test(title)) return `What makes the recovery activity in "${title}" dependable?`;
+    return `What best applies the ${standard} concept taught in "${title}"?`;
+  }
+  const incidentMatch = prompt.match(/^In CIP-008 incident-response lesson \d+, what should the learner do with the facts presented in (.+?)\?$/i);
+  if (incidentMatch) return `What should a responder do first when the facts in "${incidentMatch[1]}" are still incomplete?`;
+  return prompt;
+}
+
+function normalizePrompt(prompt: string) {
+  return prompt.toLowerCase().replace(/[^a-z0-9 ]/g, "").replace(/\s+/g, " ").trim();
 }
 
 function northValleyStoryEvents(): Array<Omit<TrainingWorldEvent, "createdAt" | "updatedAt">> {

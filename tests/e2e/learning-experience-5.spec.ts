@@ -53,6 +53,10 @@ test("learner can use 5.0 storyline, program, and investigation workflow", async
   await expect(page.getByText("Finding coverage:")).toBeVisible();
 
   await page.reload();
+  if (await page.getByRole("button", { name: "Sign In" }).isVisible().catch(() => false)) {
+    await login(page);
+    await page.goto("/#/investigations/investigation-nv-night-shift/run/e2e-night-shift");
+  }
   await expect(page.getByText("02:12 Unexpected RDP")).toBeVisible();
   await expect(page.getByText("Working hypothesis")).toBeVisible();
 });

@@ -31,7 +31,8 @@ export class LearningTimeService {
     if (done) return 0;
     const blocks = data.contentBlocks.filter((block) => block.lessonId === lesson.id);
     const estimated = blocks.length ? blocks.reduce((sum, block) => sum + this.estimateActivityTime(block), 0) : lesson.estimatedMinutes;
-    return Math.max(lesson.estimatedMinutes || 1, Math.ceil(estimated));
+    const authored = lesson.estimatedMinutes || Math.ceil(estimated) || 1;
+    return Math.max(1, Math.min(authored, Math.ceil(estimated)));
   }
 
   static estimateModuleRemaining(data: AppData, moduleId: string, userId: string) {
@@ -45,7 +46,8 @@ export class LearningTimeService {
     if (!course) return 0;
     const modules = data.modules.filter((module) => module.courseVersionId === course.currentVersionId);
     if (!modules.length) return course.estimatedMinutes;
-    return modules.reduce((sum, module) => sum + this.estimateModuleRemaining(data, module.id, userId), 0);
+    const remaining = modules.reduce((sum, module) => sum + this.estimateModuleRemaining(data, module.id, userId), 0);
+    return Math.min(course.estimatedMinutes, remaining);
   }
 
   static formatApprox(minutes: number) {

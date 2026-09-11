@@ -1,6 +1,8 @@
 name: CI
 
 on:
+  push:
+    branches: [main]
   pull_request:
   workflow_dispatch:
 
@@ -18,3 +20,5 @@ jobs:
       - run: npm run lint
       - run: npm run test
       - run: npm run build
+      - run: npx playwright install --with-deps chromium
+      - run: npm run test:e2e -- tests/e2e/qa-remediation.spec.ts tests/e2e/flagship-cip004.spec.ts

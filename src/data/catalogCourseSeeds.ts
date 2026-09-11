@@ -505,10 +505,16 @@ function authoredPromptFor(idValue: string, standard: string, title: string, ind
   if (idValue.includes("annual-awareness") && title.includes("Phishing")) return "Which red flag is strongest in an urgent account-suspension email from a lookalike domain?";
   if (idValue.includes("cip005") && title.includes("Remote")) return "A vendor asks to use an unapproved remote tool because the approved service is slow. What should happen?";
   if (idValue.includes("cip006") && title.includes("Tailgating")) return "A familiar technician asks you to hold a controlled door while carrying equipment. What is the best response?";
-  if (idValue.includes("cip008") && title.includes("Incident")) return `In ${standard} incident-response lesson ${index + 1}, what should the learner do with the facts presented in ${title}?`;
+  if (idValue.includes("cip008") && title.includes("Incident")) return `What should a responder do first when the facts in "${title}" are still incomplete?`;
   if (idValue.includes("cip010") && title.includes("Emergency")) return "A service outage requires urgent configuration change. What keeps the action controlled?";
   if (idValue.includes("cip015") && title.includes("Monitoring")) return "What does internal monitoring provide when an unexpected administrative connection appears?";
-  return `In ${standard} lesson ${index + 1}, ${title}: what is the strongest learner action?`;
+  if (title.includes("Evidence") || title.includes("Record")) return `Which action creates a traceable record for "${title}"?`;
+  if (title.includes("Access")) return `What best supports accountable access decisions in "${title}"?`;
+  if (title.includes("Change") || title.includes("Configuration")) return `What keeps the work in "${title}" controlled and reviewable?`;
+  if (title.includes("Vendor") || title.includes("Supplier")) return `What is the strongest supplier-risk action in "${title}"?`;
+  if (title.includes("Incident") || title.includes("Alert") || title.includes("Timeline")) return `What should the learner do with the facts presented in "${title}"?`;
+  if (title.includes("Recovery")) return `What makes the recovery activity in "${title}" dependable?`;
+  return `What best applies the ${standard} concept taught in "${title}"?`;
 }
 
 function authoredOptionsFor(title: string, _body: string, index: number) {

@@ -438,16 +438,19 @@ export function createSeedData(): AppData {
   const cip007 = rebuiltCatalog["course-cip007-system-security"];
   const cip005Review = rebuiltCatalog["course-cip005-esp-access"];
   const incidentApproved = rebuiltCatalog["course-cip008-incident-response"];
-  cip005Review.status = "CHANGES_REQUESTED";
+  cip005Review.status = "PUBLISHED";
   data.courseVersions.filter((version) => version.courseId === cip005Review.id).forEach((version) => {
-    version.status = "CHANGES_REQUESTED";
-    version.immutable = false;
+    version.status = "PUBLISHED";
+    version.immutable = true;
+    version.publishedAt = version.publishedAt ?? iso(subDays(new Date(), 8));
+    version.publishedById = version.publishedById ?? manager.id;
   });
-  incidentApproved.status = "APPROVED";
+  incidentApproved.status = "PUBLISHED";
   data.courseVersions.filter((version) => version.courseId === incidentApproved.id).forEach((version) => {
-    version.status = "APPROVED";
-    version.immutable = false;
-    version.publishedAt = undefined;
+    version.status = "PUBLISHED";
+    version.immutable = true;
+    version.publishedAt = version.publishedAt ?? iso(subDays(new Date(), 5));
+    version.publishedById = version.publishedById ?? manager.id;
   });
 
   const learningPathDefinitions = [
@@ -602,7 +605,7 @@ export function createSeedData(): AppData {
     record("setting", { key: "theme", value: "system" }),
     record("setting", { key: "sessionTimeoutHours", value: 8 }),
     record("setting", { key: "catalogContentVersion", value: 4 }),
-    record("setting", { key: "learningExperienceVersion", value: 5 }),
+    record("setting", { key: "learningExperienceVersion", value: 6 }),
     record("setting", { key: "version", value: "0.1.0" })
   );
 

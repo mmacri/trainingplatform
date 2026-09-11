@@ -1097,7 +1097,7 @@ export function CourseWorkspace() {
   const selectedLesson = data.lessons.find((lesson) => lesson.id === selectedLessonId) ?? data.lessons.find((lesson) => lesson.courseVersionId === version?.id);
   const selectedBlock = data.contentBlocks.find((block) => block.id === selectedBlockId);
   const banner = statusBanner(course.status);
-  const publishDisabled = !canPublishCourse(data, user.id, course.id) || course.status !== "APPROVED" || readiness.blockingIssues.length > 0;
+  const publishDisabled = !canPublishCourse(data, user.id, course.id) || (course.status !== "APPROVED" && course.status !== "PUBLISHED") || readiness.blockingIssues.length > 0;
 
   const duplicate = async () => {
     const copy = await service().duplicateCourse(course.id);
@@ -1576,16 +1576,17 @@ function ReviewTab({ course, openRequest }: { course: Course; openRequest: () =>
   const canReview = canReviewCourse(data, user.id, course.id);
   if (!review) return <Panel><EmptyState title="No review has been requested" body="Send this course to reviewers when readiness checks pass." action={<button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={openRequest}>Request Review</button>} /></Panel>;
   const comments = data.reviewComments.filter((item) => item.reviewId === review.id);
+  const changesRequested = review.status === "CHANGES_REQUESTED";
   return (
     <div className="space-y-4">
       <Panel>
         <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="font-semibold">Review status</h2><p className="text-sm text-muted-foreground">Due {format(new Date(review.dueAt), "MMM d, yyyy")}</p></div><StatusBadge status={review.status === "APPROVED" ? "APPROVED" : review.status === "CHANGES_REQUESTED" ? "CHANGES_REQUESTED" : "IN_REVIEW"} /></div>
-        {course.status === "CHANGES_REQUESTED" ? <div className="mt-3"><InlineAlert tone="danger">Changes requested. Resolve the required comments, then resubmit the course.</InlineAlert></div> : null}
+        {changesRequested ? <div className="mt-3"><InlineAlert tone="danger">Changes requested. Resolve the required comments, then resubmit the course.</InlineAlert></div> : null}
         <div className="mt-4 flex flex-wrap gap-2">
           {canReview ? <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={async () => { const body = window.prompt("Review comment", "Add a stronger evidence example."); if (body) { await service().addReviewComment(review.id, body, "BLOCKING"); await refresh(); toast("Comment added"); } }}>Add Comment</button> : null}
           {canReview ? <button className="rounded-md border border-border px-3 py-2 text-sm" onClick={async () => { await service().requestChanges(review.id, "Resolve required review comments before publication."); await refresh(); toast("Changes requested"); }}>Request Changes</button> : null}
           {canReview ? <button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={async () => { await service().approveCourseReview(review.id); await refresh(); toast("Course approved"); }}>Approve</button> : null}
-          {course.status === "CHANGES_REQUESTED" ? <button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={async () => { await service().resubmitCourseReview(course.id); await refresh(); toast("Course resubmitted"); }}>Resubmit for Review</button> : null}
+          {changesRequested ? <button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={async () => { await service().resubmitCourseReview(course.id); await refresh(); toast("Course resubmitted"); }}>Resubmit for Review</button> : null}
         </div>
       </Panel>
       <Panel>

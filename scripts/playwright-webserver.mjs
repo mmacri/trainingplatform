@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
 
@@ -22,12 +22,20 @@ function run(command, args) {
 }
 
 function shutdown() {
-  if (child && !child.killed) child.kill("SIGTERM");
+  if (child && !child.killed) {
+    if (process.platform === "win32" && child.pid) {
+      spawnSync("taskkill", ["/PID", String(child.pid), "/T", "/F"], { stdio: "ignore" });
+    } else {
+      child.kill("SIGTERM");
+    }
+  }
   process.exit(0);
 }
 
 process.on("SIGTERM", shutdown);
 process.on("SIGINT", shutdown);
+process.on("SIGHUP", shutdown);
+process.on("disconnect", shutdown);
 
 await run(npmCommand, ["run", "build"]);
 

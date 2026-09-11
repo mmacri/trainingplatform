@@ -1805,7 +1805,8 @@ export function getCourseCompletionState(data: AppData, userId: string, courseId
     if (data.lessonProgress.some((progress) => progress.userId === userId && progress.lessonId === lesson.id && progress.completedAt)) completedItems.push(lesson.id);
   }
   for (const block of requiredActivityBlocks) {
-    if (data.scenarioAttempts.some((attempt) => attempt.userId === userId && attempt.scenarioId === block.id && attempt.status === "COMPLETED")) completedItems.push(block.id);
+    const parentLessonComplete = data.lessonProgress.some((progress) => progress.userId === userId && progress.lessonId === block.lessonId && progress.completedAt);
+    if (parentLessonComplete || data.scenarioAttempts.some((attempt) => attempt.userId === userId && attempt.scenarioId === block.id && attempt.status === "COMPLETED")) completedItems.push(block.id);
   }
   const assessment = data.assessments.find((item) => item.courseVersionId === course.currentVersionId);
   const passingAttempt = assessment
@@ -1833,9 +1834,15 @@ export function getCourseCompletionState(data: AppData, userId: string, courseId
           ? { label: "View Certificate", lessonId: lessons.find((lesson) => lesson.title === "Certificate")?.id, type: "certificate" }
           : undefined;
   const calculatedPercent = requiredItems.length ? Math.round((completedItems.length / requiredItems.length) * 100) : 0;
-  const persistedPercent = data.courseProgress.find((item) => item.userId === userId && item.courseId === courseId)?.percentComplete ?? 0;
+  const progress = data.courseProgress.find((item) => item.userId === userId && item.courseId === courseId);
+  const persistedPercent = progress?.percentComplete ?? 0;
+  const displayPercent = courseComplete
+    ? 100
+    : progress?.status === "COMPLETED"
+      ? calculatedPercent
+      : Math.max(calculatedPercent, persistedPercent);
   return {
-    percent: courseComplete ? 100 : Math.max(calculatedPercent, persistedPercent),
+    percent: displayPercent,
     requiredItems,
     completedItems,
     remainingItems,

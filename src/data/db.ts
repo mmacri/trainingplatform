@@ -67,7 +67,7 @@ export async function initializeDatabase() {
     const data = await getAllData();
     const version = data.applicationSettings.find((setting) => setting.key === "learningIntelligenceVersion")?.value;
     const experienceVersion = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion")?.value;
-    if (version !== 1 || experienceVersion !== 5) {
+    if (version !== 1 || experienceVersion !== 6) {
       await replaceAllData(addLearningIntelligenceSeed(data));
     }
     return;
