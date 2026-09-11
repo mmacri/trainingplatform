@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSeedData } from "../src/data/seed";
+import { createCurrentSeedData as createSeedData } from "../src/data/current-seed/createCurrentSeed";
 import { canAccessCourse, getRoles, searchAuthorized } from "../src/services/appServices";
 
 describe("course access model", () => {

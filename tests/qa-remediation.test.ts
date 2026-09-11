@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSeedData } from "../src/data/seed";
+import { createCurrentSeedData as createSeedData } from "../src/data/current-seed/createCurrentSeed";
 import { addLearningIntelligenceSeed } from "../src/data/learningIntelligenceSeed";
 import { canAccessCourse, getCourseCompletionState } from "../src/services/appServices";
 import { LearningContentValidator } from "../src/services/learningContentValidator";

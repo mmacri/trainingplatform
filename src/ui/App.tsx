@@ -32,7 +32,7 @@ import { Link, Navigate, Route, Routes, useNavigate, useParams, useSearchParams 
 import { Bar, BarChart, CartesianGrid, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
 import { addDays, formatDistanceToNow } from "date-fns";
 import type { AppData, ContentBlock, Course, CourseVersion, Question, Role, User } from "../data/schema";
-import { createSeedData } from "../data/seed";
+import { createCurrentSeedData } from "../data/current-seed/createCurrentSeed";
 import { getAllData, replaceAllData } from "../data/db";
 import {
   AuthService,
@@ -48,7 +48,6 @@ import {
   canViewCompliance,
   canViewEvidence,
   canViewTeam,
-  calculateCourseReadiness,
   getCourseCompletionState,
   getCoachingOpportunities,
   getRoles,
@@ -65,7 +64,6 @@ import { LearnerGoalService } from "../services/learnerGoalService";
 import { LearningSearchService } from "../services/learningSearchService";
 import { LearningSessionService } from "../services/learningSessionService";
 import { LearningTimeService } from "../services/learningTimeService";
-import { LearningContentValidator } from "../services/learningContentValidator";
 import { MicroLearningRouteService } from "../services/microLearningRouteService";
 import { PracticeSetService } from "../services/practiceSetService";
 import { ProgramService } from "../services/programService";
@@ -73,6 +71,7 @@ import { SkillCompetencyService } from "../services/skillMasteryService";
 import { TrainingWorldService } from "../services/trainingWorldService";
 import { AppContext, type Toast, useApp } from "./appContext";
 import { AssignmentWizard, CourseCreationWizard, CourseManagementDashboard, CourseWorkspace } from "./course-management/CourseManagement";
+import { CourseQualityDashboard } from "./course-management/quality/CourseQualityDashboard";
 
 const demoPassword = "GridGuard-Local-2026!";
 
@@ -2408,111 +2407,13 @@ function AboutPage() {
   return <><PageHeader title="About" /><Panel><h1 className="text-2xl font-semibold">GridGuard Learning</h1><p className="mt-2">NERC CIP Training & Compliance Readiness</p><Info label="Version" value="0.1.0"/><Info label="Deployment" value="GitHub Edition"/><Info label="Storage" value="Browser Local"/><Info label="Application Status" value="Operational"/></Panel></>;
 }
 
-type QualityStatus = "READY" | "REVIEW" | "BLOCKED";
-
-function CourseQualityDashboard() {
-  const { data } = useApp();
-  const publishedCourses = data.courses
-    .filter((course) => course.status === "PUBLISHED" && course.showInCatalog)
-    .sort((left, right) => left.title.localeCompare(right.title));
-  const rows = publishedCourses.map((course) => {
-    const readiness = calculateCourseReadiness(data, course.id);
-    const health = ContentHealthService.getCourseHealth(data, course.id);
-    const audit = CourseDepthAuditService.auditCourse(data, course.id);
-    const validation = LearningContentValidator.validateCourse(data, course.id);
-    const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId);
-    const blocks = data.contentBlocks.filter((block) => lessons.some((lesson) => lesson.id === block.lessonId));
-    const assessments = data.assessments.filter((assessment) => assessment.courseVersionId === course.currentVersionId);
-    const questions = assessments.flatMap((assessment) => data.assessmentQuestions
-      .filter((item) => item.assessmentId === assessment.id)
-      .map((item) => data.questions.find((question) => question.id === item.questionId))
-      .filter(Boolean) as Question[]);
-    const duplicateCount = questions.length - new Set(questions.map((question) => normalizeQualityText(question.prompt))).size;
-    const formulaicPrompts = questions.filter((question) => /^(in\s+)?cip-\d{3}.*lesson\s+\d+|strongest learner action/i.test(question.prompt));
-    const resources = data.learningResources.filter((resource) => resource.relatedCourseIds.includes(course.id));
-    const scenarios = data.scenarioDefinitions.filter((scenario) => scenario.relatedCourseIds.includes(course.id));
-    const hasInteraction = blocks.some((block) => ["knowledge_check", "quick_recall", "classification", "matching", "sequence_builder", "decision_cards", "evidence_inspector", "system_inspector", "network_explorer", "artifact_review", "record_repair", "rapid_decisions"].includes(block.type));
-    const hasVisual = blocks.some((block) => ["learning_diagram", "process_diagram", "timeline", "network_explorer", "system_inspector", "artifact_review", "quality_comparison"].includes(block.type));
-    const statuses = {
-      content: readiness.blockingIssues.length || audit.dimensions.contentDepth === "NEEDS_ATTENTION" ? "REVIEW" : "READY",
-      interactions: hasInteraction && audit.dimensions.activePractice === "STRONG" ? "READY" : "REVIEW",
-      scenario: scenarios.length && audit.dimensions.scenarioQuality === "STRONG" ? "READY" : "REVIEW",
-      assessment: formulaicPrompts.length || duplicateCount > Math.max(1, Math.floor(questions.length * 0.1)) ? "BLOCKED" : audit.dimensions.assessmentQuality === "STRONG" ? "READY" : "REVIEW",
-      completion: readiness.blockingIssues.some((issue) => issue.category === "Completion") ? "BLOCKED" : "READY",
-      reference: resources.length && audit.dimensions.referenceValue === "STRONG" ? "READY" : "REVIEW",
-      accessibility: hasInteraction || hasVisual ? "REVIEW" : "READY",
-      responsive: hasVisual ? "REVIEW" : "READY",
-      automatedTest: course.id === "course-cip004-annual-refresher" || course.id === "course-cip007-system-security" ? "READY" : "REVIEW"
-    } satisfies Record<string, QualityStatus>;
-    const overall: QualityStatus = validation.some((item) => item.severity === "BLOCKED") || health.state === "Blocking Issues" || Object.values(statuses).includes("BLOCKED") ? "BLOCKED" : health.state === "Needs Attention" || audit.overallState !== "STRONG" || Object.values(statuses).includes("REVIEW") || validation.some((item) => item.severity === "REVIEW") ? "REVIEW" : "READY";
-    const findings = [
-      ...readiness.blockingIssues.map((issue) => `${issue.category}: ${issue.message}`),
-      ...readiness.warnings.map((issue) => `${issue.category}: ${issue.message}`),
-      ...health.signals,
-      ...validation.slice(0, 6).map((item) => `${item.category}: ${item.message}`),
-      ...audit.findings.filter((finding) => finding.severity !== "INFO").slice(0, 4).map((finding) => `${finding.category}: ${finding.message}`),
-      ...formulaicPrompts.map((question) => `Formulaic prompt: ${question.prompt.slice(0, 90)}`)
-    ];
-    return { course, statuses, overall, findings };
-  });
-  return (
-    <>
-      <PageHeader title="Course Quality" subtitle="Release readiness for published learner-facing courses using existing readiness, health, depth, assessment, completion, reference, accessibility, responsive, and automated-test signals." />
-      <Panel>
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[1080px] border-collapse text-left text-sm">
-            <thead>
-              <tr className="border-b border-border text-xs uppercase text-muted-foreground">
-                {["Course", "Content", "Interactions", "Scenario", "Assessment", "Completion", "Reference", "A11y", "Responsive", "Tests", "Overall"].map((header) => <th key={header} className="px-3 py-2 font-medium">{header}</th>)}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.course.id} className="border-b border-border align-top">
-                  <td className="px-3 py-3">
-                    <Link className="font-medium text-cyan-700" to={`/build/courses/${row.course.id}`}>{row.course.shortTitle ?? row.course.title}</Link>
-                    {row.findings.length ? <details className="mt-2"><summary className="cursor-pointer text-xs text-muted-foreground">Findings ({row.findings.length})</summary><ul className="mt-2 list-disc space-y-1 pl-4 text-xs text-muted-foreground">{row.findings.map((finding) => <li key={finding}>{finding}</li>)}</ul></details> : null}
-                  </td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.content} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.interactions} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.scenario} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.assessment} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.completion} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.reference} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.accessibility} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.responsive} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.statuses.automatedTest} /></td>
-                  <td className="px-3 py-3"><QualityBadge status={row.overall} /></td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Panel>
-    </>
-  );
-}
-
-function QualityBadge({ status }: { status: QualityStatus }) {
-  const className = status === "READY"
-    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900 dark:bg-emerald-950 dark:text-emerald-100"
-    : status === "BLOCKED"
-      ? "border-red-200 bg-red-50 text-red-800 dark:border-red-900 dark:bg-red-950 dark:text-red-100"
-      : "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-100";
-  return <span className={`inline-flex rounded-md border px-2 py-1 text-xs font-semibold ${className}`}>{status}</span>;
-}
-
-function normalizeQualityText(value: string) {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
 function DataManagement() {
   const { data, service, setData, toast } = useApp();
   const [storage, setStorage] = useState<{ usage?: number; quota?: number }>({});
   useEffect(() => { navigator.storage?.estimate?.().then(setStorage).catch(() => undefined); }, []);
   const exportData = async () => { await service().exportBackupFile(); toast("Backup exported"); };
   const importData = async (file?: File) => { if (!file) return; try { await service().restoreBackup(await file.text()); setData(await getAllData()); toast("Backup restored"); } catch { toast("This backup could not be read"); } };
-  return <Panel className="mt-5"><h2 className="font-semibold">Data Management</h2><div className="mt-3 grid gap-3 md:grid-cols-4"><Info label="Storage Mode" value="Browser Local"/><Info label="Courses" value={data.courses.length}/><Info label="Users" value={data.users.length}/><Info label="Evidence Records" value={data.evidenceRecords.length}/></div><p className="mt-3 text-sm text-muted-foreground">Used: {storage.usage ? `${Math.round(storage.usage / 1024)} KB` : "Unknown"} / {storage.quota ? `${Math.round(storage.quota / 1024 / 1024)} MB` : "Unknown"}</p><div className="mt-4 flex flex-wrap gap-2"><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={exportData}><Download className="mr-1 inline" size={15}/>Export Full Backup</button><label className="rounded-md border border-border px-3 py-2 text-sm"><Upload className="mr-1 inline" size={15}/>Import Backup<input type="file" accept="application/json" className="hidden" onChange={(e) => importData(e.target.files?.[0])}/></label><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={async () => { await replaceAllData(createSeedData()); setData(await getAllData()); toast("Demo data restored"); }}><RefreshCw className="mr-1 inline" size={15}/>Restore Demo Data</button></div></Panel>;
+  return <Panel className="mt-5"><h2 className="font-semibold">Data Management</h2><div className="mt-3 grid gap-3 md:grid-cols-4"><Info label="Storage Mode" value="Browser Local"/><Info label="Courses" value={data.courses.length}/><Info label="Users" value={data.users.length}/><Info label="Evidence Records" value={data.evidenceRecords.length}/></div><p className="mt-3 text-sm text-muted-foreground">Used: {storage.usage ? `${Math.round(storage.usage / 1024)} KB` : "Unknown"} / {storage.quota ? `${Math.round(storage.quota / 1024 / 1024)} MB` : "Unknown"}</p><div className="mt-4 flex flex-wrap gap-2"><button className="rounded-md bg-cyan-700 px-3 py-2 text-sm text-white" onClick={exportData}><Download className="mr-1 inline" size={15}/>Export Full Backup</button><label className="rounded-md border border-border px-3 py-2 text-sm"><Upload className="mr-1 inline" size={15}/>Import Backup<input type="file" accept="application/json" className="hidden" onChange={(e) => importData(e.target.files?.[0])}/></label><button className="rounded-md border border-border px-3 py-2 text-sm" onClick={async () => { await replaceAllData(createCurrentSeedData()); setData(await getAllData()); toast("Demo data restored"); }}><RefreshCw className="mr-1 inline" size={15}/>Restore Demo Data</button></div></Panel>;
 }
 
 function QuickCreate() {

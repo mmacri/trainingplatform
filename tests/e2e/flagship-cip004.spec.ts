@@ -1,34 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const password = "GridGuard-Local-2026!";
-
-async function resetBrowserData(page: Page) {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase("GridGuardDB");
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => resolve();
-    });
-  });
-}
-
-async function login(page: Page, email: string) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("link", { name: /Home/ }).first()).toBeVisible();
-}
-
-test.beforeEach(async ({ page }) => {
-  await resetBrowserData(page);
-});
+import { expect, test } from "./support/fixtures";
+import { loginAs } from "./support/auth";
 
 test("Taylor resumes the flagship CIP-004 course and completes the role-change activity", async ({ page }) => {
-  await login(page, "learner@gridguard.local");
+  await loginAs(page, "learner");
   await page.getByRole("link", { name: /My Learning/ }).click();
   await expect(page.getByRole("heading", { name: /NERC CIP-004 Personnel Security & Training/ })).toBeVisible();
   await page.locator('a[href^="#/learn/course-cip004-annual-refresher/"]').click();

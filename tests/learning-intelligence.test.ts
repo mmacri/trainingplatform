@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSeedData } from "../src/data/seed";
+import { createCurrentSeedData as createSeedData } from "../src/data/current-seed/createCurrentSeed";
 import { LearningRecommendationService, SkillMasteryService, WorkflowService, searchAuthorized } from "../src/services/appServices";
 
 describe("learning intelligence", () => {

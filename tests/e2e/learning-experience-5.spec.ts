@@ -1,34 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const password = "GridGuard-Local-2026!";
-
-async function resetBrowserData(page: Page) {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase("GridGuardDB");
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => resolve();
-    });
-  });
-}
-
-async function login(page: Page, email = "learner@gridguard.local") {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("link", { name: /Home/ }).first()).toBeVisible();
-}
-
-test.beforeEach(async ({ page }) => {
-  await resetBrowserData(page);
-});
+import { expect, test } from "./support/fixtures";
+import { loginAs } from "./support/auth";
 
 test("learner can use 5.0 storyline, program, and investigation workflow", async ({ page }) => {
-  await login(page);
+  await loginAs(page, "learner");
 
   await page.goto("/#/environment/timeline");
   await expect(page.getByRole("heading", { name: "North Valley Story Timeline" })).toBeVisible();
@@ -54,7 +28,7 @@ test("learner can use 5.0 storyline, program, and investigation workflow", async
 
   await page.reload();
   if (await page.getByRole("button", { name: "Sign In" }).isVisible().catch(() => false)) {
-    await login(page);
+    await loginAs(page, "learner");
     await page.goto("/#/investigations/investigation-nv-night-shift/run/e2e-night-shift");
   }
   await expect(page.getByText("02:12 Unexpected RDP")).toBeVisible();
@@ -62,7 +36,7 @@ test("learner can use 5.0 storyline, program, and investigation workflow", async
 });
 
 test("manager coaching exposes prompts and bundle assignment", async ({ page }) => {
-  await login(page, "manager@gridguard.local");
+  await loginAs(page, "manager");
 
   await page.goto("/#/team/coaching");
   await expect(page.getByRole("heading", { name: "Coaching" })).toBeVisible();

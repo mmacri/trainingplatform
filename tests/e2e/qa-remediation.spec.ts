@@ -1,34 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const password = "GridGuard-Local-2026!";
-
-async function resetBrowserData(page: Page) {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase("GridGuardDB");
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => resolve();
-    });
-  });
-}
-
-async function login(page: Page, email = "learner@gridguard.local") {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("link", { name: /Home/ }).first()).toBeVisible();
-}
-
-test.beforeEach(async ({ page }) => {
-  await resetBrowserData(page);
-});
+import { expect, test } from "./support/fixtures";
+import { loginAs } from "./support/auth";
 
 test("learner can open review-demo courses that remain required by programs", async ({ page }) => {
-  await login(page);
+  await loginAs(page, "learner");
 
   const courses = [
     { id: "course-cip005-esp-access", title: /Electronic Security Perimeter Access|CIP-005/i },
@@ -49,7 +23,7 @@ test("learner can open review-demo courses that remain required by programs", as
 });
 
 test("global search and Course Quality dashboard expose remediation signals", async ({ page }) => {
-  await login(page, "manager@gridguard.local");
+  await loginAs(page, "manager");
 
   await page.getByLabel("Search").last().click();
   await page.getByPlaceholder("Search courses, lessons, practice, scenarios, resources, skills...").fill("patch");
@@ -64,7 +38,7 @@ test("global search and Course Quality dashboard expose remediation signals", as
 
 test("header controls meet 44px touch target minimum on mobile", async ({ page }) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await login(page);
+  await loginAs(page, "learner");
 
   const controls = [
     page.getByLabel("Open navigation"),

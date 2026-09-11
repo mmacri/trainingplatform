@@ -1,34 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const password = "GridGuard-Local-2026!";
-
-async function resetBrowserData(page: Page) {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase("GridGuardDB");
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => resolve();
-    });
-  });
-}
-
-async function login(page: Page) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill("learner@gridguard.local");
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("link", { name: /Home/ }).first()).toBeVisible();
-}
-
-test.beforeEach(async ({ page }) => {
-  await resetBrowserData(page);
-});
+import { expect, test } from "./support/fixtures";
+import { loginAs } from "./support/auth";
 
 test("learner can open North Valley context, reference mode, and scenario series", async ({ page }) => {
-  await login(page);
+  await loginAs(page, "learner");
 
   await page.goto("/#/environment");
   await expect(page.getByRole("heading", { name: "North Valley Energy" })).toBeVisible();

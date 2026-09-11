@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSeedData } from "../src/data/seed";
+import { createCurrentSeedData as createSeedData } from "../src/data/current-seed/createCurrentSeed";
 import { WorkflowService } from "../src/services/appServices";
 import { ActivityVariantService } from "../src/services/activityVariantService";
 import { CourseDepthAuditService } from "../src/services/courseDepthAuditService";

@@ -99,6 +99,12 @@ export function addLearningIntelligenceSeed(data: AppData) {
       data.skills.push(stamp({ id, organizationId, name, description, category, level: "Shared Skill", relatedStandardIds: [], relatedCourseIds: [] }));
     }
   }
+  const seenSkillIds = new Set<string>();
+  data.skills = data.skills.filter((skill) => {
+    if (seenSkillIds.has(skill.id)) return false;
+    seenSkillIds.add(skill.id);
+    return true;
+  });
 
   const existingPractice = new Set(data.practiceActivities.map((activity) => activity.id));
   practiceDefs.forEach((definition) => {

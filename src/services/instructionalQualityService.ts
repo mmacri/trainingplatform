@@ -1,4 +1,6 @@
-import type { AppData, Course, Lesson } from "../data/schema";
+import type { AppData, Lesson } from "../data/schema";
+import { buildCourseAnalysisContext, type CourseAnalysisContext } from "../domain/courseSelectors";
+import { isAppliedBlock, isInteractiveBlock, isTextHeavyBlock, isVisualBlock } from "../domain/contentBlockTaxonomy";
 
 export interface InstructionalQualityFinding {
   id: string;
@@ -21,41 +23,39 @@ export interface CourseInstructionalQuality {
   findings: InstructionalQualityFinding[];
 }
 
-const visualTypes = new Set(["learning_diagram", "process_diagram", "timeline", "before_after", "comparison", "network_explorer", "system_inspector", "evidence_inspector", "artifact_review", "investigation_activity", "record_repair"]);
-const actionTypes = new Set(["knowledge_check", "quick_recall", "decision_cards", "classification", "matching", "sequence_builder", "rapid_decisions", "checklist", "checklist_activity", "system_inspector", "evidence_inspector", "artifact_review", "investigation_activity", "record_repair", "scenario"]);
-const appliedTypes = new Set(["scenario", "system_inspector", "network_explorer", "artifact_review", "investigation_activity", "record_repair"]);
-
 export class InstructionalQualityService {
   static analyzeCourse(data: AppData, courseId: string): CourseInstructionalQuality {
-    const course = data.courses.find((item) => item.id === courseId);
-    if (!course) return emptyQuality("Course not found");
-    const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId);
+    const context = buildCourseAnalysisContext(data, courseId);
+    if (!context) return emptyQuality("Course not found");
+    return this.analyzeContext(data, context);
+  }
+
+  static analyzeContext(data: AppData, context: CourseAnalysisContext): CourseInstructionalQuality {
+    const { course, lessons, blocks, assessments, assessmentQuestions, resources, courseResources } = context;
     const findings: InstructionalQualityFinding[] = [];
-    const blocks = data.contentBlocks.filter((block) => lessons.some((lesson) => lesson.id === block.lessonId));
 
     for (const lesson of lessons) {
       findings.push(...this.analyzeLesson(data, lesson));
     }
 
-    const resources = data.learningResources.filter((resource) => resource.relatedCourseIds.includes(course.id)).length + data.courseResources.filter((resource) => resource.courseId === course.id).length;
-    if (!resources) {
+    const resourceCount = resources.length + courseResources.length;
+    if (!resourceCount) {
       findings.push(finding("WARNING", "Reference Value", `${course.title} has no reusable reference resource.`, "Course", course.id, "Add a quick reference, checklist, or job aid for Use at Work mode."));
     }
 
-    const assessment = data.assessments.find((item) => item.courseVersionId === course.currentVersionId);
-    const questions = assessment ? data.assessmentQuestions.filter((item) => item.assessmentId === assessment.id) : [];
+    const questions = assessments.length ? assessmentQuestions : [];
     if (course.finalAssessmentEnabled !== false && !questions.length) {
       findings.push(finding("BLOCKING", "Assessment", "Final assessment is enabled but has no questions.", "Course", course.id, "Add valid assessment questions or disable the final assessment."));
     }
 
     return {
       structure: findings.some((item) => item.category === "Structure") ? "NEEDS_ATTENTION" : "STRONG",
-      visualLearning: blocks.some((block) => visualTypes.has(block.type)) ? "STRONG" : "NEEDS_ATTENTION",
-      interactivity: blocks.some((block) => actionTypes.has(block.type)) ? "STRONG" : "NEEDS_ATTENTION",
-      appliedPractice: blocks.some((block) => appliedTypes.has(block.type)) ? "STRONG" : "NEEDS_ATTENTION",
+      visualLearning: blocks.some((block) => isVisualBlock(block.type)) ? "STRONG" : "NEEDS_ATTENTION",
+      interactivity: blocks.some((block) => isInteractiveBlock(block.type)) ? "STRONG" : "NEEDS_ATTENTION",
+      appliedPractice: blocks.some((block) => isAppliedBlock(block.type)) ? "STRONG" : "NEEDS_ATTENTION",
       feedback: findings.some((item) => item.category === "Feedback") ? "NEEDS_ATTENTION" : "STRONG",
       reinforcement: blocks.some((block) => block.type === "quick_recall") ? "STRONG" : "NEEDS_ATTENTION",
-      referenceValue: resources ? "STRONG" : "NEEDS_ATTENTION",
+      referenceValue: resourceCount ? "STRONG" : "NEEDS_ATTENTION",
       findings
     };
   }
@@ -71,7 +71,7 @@ export class InstructionalQualityService {
     let consecutiveText = 0;
     for (const block of blocks) {
       const words = `${block.title ?? ""} ${block.body ?? ""}`.split(/\s+/).filter(Boolean).length;
-      const textHeavy = ["paragraph", "rich_text"].includes(block.type) && words > 120;
+      const textHeavy = isTextHeavyBlock(block.type) && words > 120;
       textWords += words;
       consecutiveText = textHeavy ? consecutiveText + 1 : 0;
       if (consecutiveText >= 3) {
@@ -79,13 +79,13 @@ export class InstructionalQualityService {
         consecutiveText = 0;
       }
     }
-    if (textWords > 700 && !blocks.some((block) => visualTypes.has(block.type) || actionTypes.has(block.type))) {
+    if (textWords > 700 && !blocks.some((block) => isVisualBlock(block.type) || isInteractiveBlock(block.type))) {
       findings.push(finding("WARNING", "Visual Learning", `${lesson.title} has about ${textWords} words without a meaningful learner action or visual anchor.`, "Lesson", lesson.id, "Add one visual explanation or applied artifact review."));
     }
-    if (!blocks.some((block) => visualTypes.has(block.type))) {
+    if (!blocks.some((block) => isVisualBlock(block.type))) {
       findings.push(finding("INFO", "Visual Learning", `${lesson.title} has no visual, artifact, or simulation block.`, "Lesson", lesson.id, "Consider adding a diagram, artifact, or comparison if it would improve understanding."));
     }
-    if (!blocks.some((block) => actionTypes.has(block.type))) {
+    if (!blocks.some((block) => isInteractiveBlock(block.type))) {
       findings.push(finding("WARNING", "Interactivity", `${lesson.title} has no meaningful learner action.`, "Lesson", lesson.id, "Add a knowledge check, investigation, decision, or classification activity."));
     }
     if (!blocks.some((block) => block.type === "module_summary" || block.type.includes("takeaway") || /takeaway|you can now/i.test(`${block.title ?? ""} ${block.body ?? ""}`))) {

@@ -1,34 +1,8 @@
-import { expect, test, type Page } from "@playwright/test";
-
-const password = "GridGuard-Local-2026!";
-
-async function resetBrowserData(page: Page) {
-  await page.goto("/");
-  await page.evaluate(async () => {
-    localStorage.clear();
-    await new Promise<void>((resolve, reject) => {
-      const request = indexedDB.deleteDatabase("GridGuardDB");
-      request.onsuccess = () => resolve();
-      request.onerror = () => reject(request.error);
-      request.onblocked = () => resolve();
-    });
-  });
-}
-
-async function login(page: Page, email: string) {
-  await page.goto("/");
-  await page.getByLabel("Email").fill(email);
-  await page.getByLabel("Password").fill(password);
-  await page.getByRole("button", { name: "Sign In" }).click();
-  await expect(page.getByRole("link", { name: /Home/ }).first()).toBeVisible();
-}
-
-test.beforeEach(async ({ page }) => {
-  await resetBrowserData(page);
-});
+import { expect, test } from "./support/fixtures";
+import { loginAs } from "./support/auth";
 
 test("learner completes practice and sees skill evidence", async ({ page }) => {
-  await login(page, "learner@gridguard.local");
+  await loginAs(page, "learner");
   await page.goto("/#/practice");
   await expect(page.getByRole("heading", { name: "Practice", exact: true })).toBeVisible();
 
@@ -44,7 +18,7 @@ test("learner completes practice and sees skill evidence", async ({ page }) => {
 });
 
 test("scenario branching persists and replay preserves the original attempt", async ({ page }) => {
-  await login(page, "learner@gridguard.local");
+  await loginAs(page, "learner");
   await page.goto("/#/scenarios/scenario-unexpected-admin-connection");
   await page.getByRole("button", { name: "Start Scenario" }).click();
   await expect(page.getByRole("heading", { name: "Unexpected Administrative Connection" })).toBeVisible();

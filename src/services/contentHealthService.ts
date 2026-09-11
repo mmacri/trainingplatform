@@ -1,4 +1,5 @@
 import type { AppData } from "../data/schema";
+import { buildCourseAnalysisContext } from "../domain/courseSelectors";
 
 export interface ContentHealth {
   courseId: string;
@@ -8,11 +9,12 @@ export interface ContentHealth {
 
 export class ContentHealthService {
   static getCourseHealth(data: AppData, courseId: string): ContentHealth {
-    const course = data.courses.find((item) => item.id === courseId);
+    const context = buildCourseAnalysisContext(data, courseId);
+    const course = context?.course;
     const signals: string[] = [];
-    const feedback = data.contentFeedbackItems.filter((item) => item.courseId === courseId || item.targetId === courseId);
+    const feedback = context?.feedback ?? [];
     const broken = feedback.filter((item) => item.feedbackType === "BROKEN_ACTIVITY" || item.issueType === "BROKEN");
-    const mappings = data.courseStandardMappings.filter((item) => item.courseId === courseId);
+    const mappings = context?.mappings ?? [];
     const reviews = data.standardChangeReviews.filter((review) => review.affectedCourseIds.includes(courseId) && review.status !== "COMPLETE");
     if (feedback.length) signals.push(`${feedback.length} learner feedback item${feedback.length === 1 ? "" : "s"}`);
     if (broken.length) signals.push(`${broken.length} broken activity report${broken.length === 1 ? "" : "s"}`);

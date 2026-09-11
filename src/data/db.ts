@@ -1,8 +1,8 @@
 import Dexie, { type Table } from "dexie";
 import type { AppData, TableName } from "./schema";
 import { tableNames } from "./schema";
-import { createSeedData } from "./seed";
-import { addLearningIntelligenceSeed } from "./learningIntelligenceSeed";
+import { createCurrentSeedData } from "./current-seed/createCurrentSeed";
+import { migrateDatabase } from "./migrations/migrate";
 
 export const schemaVersion = 7;
 
@@ -65,14 +65,11 @@ export async function initializeDatabase() {
   await db.open();
   if (await isInitialized()) {
     const data = await getAllData();
-    const version = data.applicationSettings.find((setting) => setting.key === "learningIntelligenceVersion")?.value;
-    const experienceVersion = data.applicationSettings.find((setting) => setting.key === "learningExperienceVersion")?.value;
-    if (version !== 1 || experienceVersion !== 6) {
-      await replaceAllData(addLearningIntelligenceSeed(data));
-    }
+    const migrated = migrateDatabase(data);
+    if (migrated !== data) await replaceAllData(migrated);
     return;
   }
-  const seed = createSeedData();
+  const seed = createCurrentSeedData();
   await replaceAllData(seed);
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createSeedData } from "../src/data/seed";
+import { createCurrentSeedData as createSeedData } from "../src/data/current-seed/createCurrentSeed";
 import { ContentHealthService } from "../src/services/contentHealthService";
 import { LearnerJourneyService } from "../src/services/learnerJourneyService";
 import { LearningSearchService } from "../src/services/learningSearchService";

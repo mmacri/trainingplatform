@@ -1,4 +1,5 @@
 import type { AppData } from "../data/schema";
+import { buildCourseAnalysisContext } from "../domain/courseSelectors";
 
 export type LearningContentValidationSeverity = "READY" | "REVIEW" | "BLOCKED";
 
@@ -20,24 +21,20 @@ export interface LearningContentValidationIssue {
 
 export class LearningContentValidator {
   static validateCourse(data: AppData, courseId: string): LearningContentValidationIssue[] {
-    const course = data.courses.find((item) => item.id === courseId);
-    if (!course) return [issue("missing-course", "BLOCKED", "BROKEN_ID", `Course ${courseId} does not exist.`, courseId)];
+    const context = buildCourseAnalysisContext(data, courseId);
+    if (!context) return [issue("missing-course", "BLOCKED", "BROKEN_ID", `Course ${courseId} does not exist.`, courseId)];
+    const { course, lessons, modules, blocks, assessments, resources } = context;
     const issues: LearningContentValidationIssue[] = [];
-    const lessons = data.lessons.filter((lesson) => lesson.courseVersionId === course.currentVersionId);
-    const lessonIds = new Set(lessons.map((lesson) => lesson.id));
-    const modules = data.modules.filter((module) => module.courseVersionId === course.currentVersionId);
     const moduleIds = new Set(modules.map((module) => module.id));
 
     lessons.forEach((lesson) => {
       if (!moduleIds.has(lesson.moduleId)) issues.push(issue(`${course.id}-${lesson.id}-module`, "BLOCKED", "BROKEN_ID", `${lesson.title} points to a missing module.`, lesson.id, course.id));
     });
-    data.contentBlocks
-      .filter((block) => lessonIds.has(block.lessonId))
+    blocks
       .forEach((block) => {
         if (!block.title?.trim() && !block.body?.trim()) issues.push(issue(`${course.id}-${block.id}-empty`, "REVIEW", "REFERENCE", `A ${block.type} block has no learner-facing title or body.`, block.id, course.id));
       });
 
-    const assessments = data.assessments.filter((assessment) => assessment.courseVersionId === course.currentVersionId);
     assessments.forEach((assessment) => {
       const links = data.assessmentQuestions.filter((link) => link.assessmentId === assessment.id);
       if (assessment.required && links.length < 3) issues.push(issue(`${assessment.id}-few-questions`, "BLOCKED", "ASSESSMENT", `${assessment.title} has fewer than 3 questions.`, assessment.id, course.id));
@@ -78,7 +75,6 @@ export class LearningContentValidator {
         });
       });
 
-    const resources = data.learningResources.filter((resource) => resource.relatedCourseIds.includes(course.id));
     if (!resources.length) issues.push(issue(`${course.id}-resources`, "REVIEW", "REFERENCE", "Course has no Use at Work reference resources.", course.id, course.id));
     return issues;
   }
